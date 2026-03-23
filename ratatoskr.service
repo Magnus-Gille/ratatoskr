@@ -1,0 +1,21 @@
+[Unit]
+Description=Ratatoskr Telegram Router
+After=network-online.target munin-memory.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=magnus
+WorkingDirectory=/home/magnus/repos/ratatoskr
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=10
+EnvironmentFile=/home/magnus/repos/ratatoskr/.env
+
+ProtectSystem=strict
+ReadWritePaths=/home/magnus /tmp
+NoNewPrivileges=true
+PrivateTmp=false
+
+[Install]
+WantedBy=multi-user.target
