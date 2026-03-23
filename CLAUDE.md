@@ -1,0 +1,97 @@
+# Ratatoskr — CLAUDE.md
+
+## What this project is
+
+Ratatoskr is a Telegram router and concierge for the Grimnir personal AI system. Named after the squirrel that carries messages between the eagle and serpent on Yggdrasil. It lets Magnus interact with Grimnir from Telegram — sending tasks from a phone and receiving results back.
+
+Part of the Grimnir system: **Munin** (memory), **Hugin** (task dispatcher), **Ratatoskr** (Telegram router).
+
+## Architecture
+
+- **Runtime:** Node.js 20+, TypeScript (strict mode)
+- **Framework:** Express (health endpoint only) + grammy (Telegram bot)
+- **AI:** @anthropic-ai/sdk (Haiku for intent triage via concierge layer)
+- **Deployment:** systemd on Pi 1 (huginmunin), port 3034
+- **Telegram mode:** Long-polling (no webhook, no inbound HTTP)
+
+### How it works
+
+1. Telegram message arrives from allowlisted user
+2. Concierge layer calls Claude Haiku with message + Munin context
+3. Haiku decides: ready (submit task), clarify (ask user), or answer (reply directly)
+4. If ready: task-writer formats Hugin task and writes to Munin
+5. Result-poller monitors task completion and replies on Telegram
+
+### Components
+
+- `src/index.ts` — Express health endpoint + bot startup
+- `src/bot.ts` — Telegram bot setup, message handler, allowlist
+- `src/concierge.ts` — Intent triage via Claude Haiku API
+- `src/task-writer.ts` — Format task markdown, write to Munin
+- `src/result-poller.ts` — Poll Munin for task results, reply on Telegram
+- `src/munin-client.ts` — HTTP client for Munin JSON-RPC API
+- `src/config.ts` — Environment configuration
+
+## How to build
+
+```bash
+npm install
+npm run build
+```
+
+## How to test
+
+```bash
+npm test
+```
+
+## How to run locally
+
+```bash
+TELEGRAM_BOT_TOKEN=<token> TELEGRAM_ALLOWED_USERS=<user_id> MUNIN_API_KEY=<key> npm run dev
+```
+
+## Deployment
+
+```bash
+./scripts/deploy-pi.sh [hostname]
+```
+
+Default host: `huginmunin.local`.
+
+The Pi needs a `.env` file at `/home/magnus/repos/ratatoskr/.env`:
+```
+TELEGRAM_BOT_TOKEN=<from BotFather>
+TELEGRAM_ALLOWED_USERS=<magnus telegram user id>
+ANTHROPIC_API_KEY=<for concierge Haiku calls>
+MUNIN_API_KEY=<same key Munin/Hugin use>
+```
+
+## Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3034` | Health endpoint port |
+| `HOST` | `127.0.0.1` | Bind address |
+| `TELEGRAM_BOT_TOKEN` | — | Bot token from @BotFather (required) |
+| `TELEGRAM_ALLOWED_USERS` | — | Comma-separated Telegram user IDs (required) |
+| `ANTHROPIC_API_KEY` | — | API key for concierge Haiku calls (required) |
+| `CONCIERGE_MODEL` | `claude-haiku-4-5-20251001` | Model for intent triage |
+| `MUNIN_URL` | `http://localhost:3030` | Munin HTTP endpoint |
+| `MUNIN_API_KEY` | — | Bearer token for Munin (required) |
+| `POLL_INTERVAL_MS` | `30000` | How often to check task results |
+| `MAX_POLL_DURATION_MS` | `7200000` | Stop polling after this (2x default task timeout) |
+
+## Concierge design
+
+The concierge is a lightweight Claude Haiku call (~2000 tokens, ~$0.001/call) that triages incoming Telegram messages before submitting Hugin tasks. It receives:
+- The user's message
+- Recent Munin context (last 5 log entries from active projects, current task queue)
+- Conversation history (if in a clarification loop)
+
+It returns one of three actions:
+- `ready` — intent is clear, here's the enriched task prompt, context, and timeout
+- `clarify` — ambiguous, here's a question to ask the user
+- `answer` — can be answered directly from context, no task needed
+
+Tone: casual and terse (matches phone context).
