@@ -3,6 +3,7 @@ import { config, validateConfig } from "./config.js";
 import { MuninClient } from "./munin-client.js";
 import { ResultPoller } from "./result-poller.js";
 import { createBot } from "./bot.js";
+import { recoverActivePolls } from "./recovery.js";
 
 validateConfig();
 
@@ -33,9 +34,18 @@ const server = app.listen(config.port, config.host, () => {
 
 bot
   .start({
-    onStart: () => {
+    onStart: async () => {
       botConnected = true;
       console.log("Ratatoskr Telegram bot started (long-polling)");
+      try {
+        const recovered = await recoverActivePolls(munin, poller, bot.api);
+        if (recovered > 0) {
+          console.log(`Recovered ${recovered} task(s) from Munin`);
+        }
+      } catch (err) {
+        console.error("Failed to recover active polls:", err);
+        // Non-fatal — bot still works for new messages
+      }
     },
   })
   .catch((err) => {

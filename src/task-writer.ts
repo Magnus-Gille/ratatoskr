@@ -1,3 +1,4 @@
+import { config } from "./config.js";
 import { MuninClient } from "./munin-client.js";
 
 export interface TaskSubmission {
@@ -51,6 +52,7 @@ export async function submitTask(
   await munin.write(`tasks/${taskId}`, "status", content, [
     "pending",
     "runtime:claude",
+    `instance:${config.instanceId}`,
   ]);
 
   return taskId;

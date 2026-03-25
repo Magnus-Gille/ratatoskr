@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../src/config.js", () => ({
-  config: {},
+  config: {
+    instanceId: "test-instance",
+  },
 }));
 
 import { submitTask } from "../src/task-writer.js";
@@ -59,7 +61,7 @@ describe("task-writer", () => {
     expect(content).toContain("**Reply-to:** telegram:12345");
     expect(content).toContain("### Prompt");
     expect(content).toContain("Fix the login bug");
-    expect(tags).toEqual(["pending", "runtime:claude"]);
+    expect(tags).toEqual(["pending", "runtime:claude", "instance:test-instance"]);
   });
 
   it("should slugify title for task ID", async () => {

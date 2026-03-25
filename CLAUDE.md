@@ -24,12 +24,14 @@ Part of the Grimnir system: **Munin** (memory), **Hugin** (task dispatcher), **R
 
 ### Components
 
-- `src/index.ts` — Express health endpoint + bot startup
-- `src/bot.ts` — Telegram bot setup, message handler, allowlist
+- `src/index.ts` — Express health endpoint + bot startup + poll recovery
+- `src/bot.ts` — Telegram bot setup, message handler, allowlist, conversation persistence
 - `src/concierge.ts` — Intent triage via Claude Haiku API
-- `src/task-writer.ts` — Format task markdown, write to Munin
-- `src/result-poller.ts` — Poll Munin for task results, reply on Telegram
+- `src/task-writer.ts` — Format task markdown, write to Munin (with instance tag)
+- `src/result-poller.ts` — Poll Munin for task results, delivery confirmation
+- `src/recovery.ts` — Startup recovery: reattach polls, deliver undelivered results
 - `src/munin-client.ts` — HTTP client for Munin JSON-RPC API
+- `src/telegram-util.ts` — Shared Telegram helpers (message truncation)
 - `src/config.ts` — Environment configuration
 
 ## How to build
@@ -81,6 +83,7 @@ MUNIN_API_KEY=<same key Munin/Hugin use>
 | `MUNIN_API_KEY` | — | Bearer token for Munin (required) |
 | `POLL_INTERVAL_MS` | `30000` | How often to check task results |
 | `MAX_POLL_DURATION_MS` | `7200000` | Stop polling after this (2x default task timeout) |
+| `RATATOSKR_INSTANCE_ID` | `default` | Instance identifier for multi-instance isolation |
 
 ## Concierge design
 

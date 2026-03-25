@@ -13,7 +13,7 @@ export class ResultPoller {
 
   startPolling(
     taskId: string,
-    onComplete: (result: string) => void
+    onComplete: (result: string) => Promise<void> | void
   ): void {
     // Don't double-poll
     if (this.activePolls.has(taskId)) return;
@@ -25,8 +25,17 @@ export class ResultPoller {
         if (!entry || this.stopped) return;
 
         const tags = entry.tags || [];
-        if (tags.includes("completed") || tags.includes("failed")) {
+        if (
+          tags.includes("completed") ||
+          tags.includes("failed") ||
+          tags.includes("cancelled")
+        ) {
           this.stopPolling(taskId);
+
+          if (tags.includes("cancelled")) {
+            await onComplete(`Task ${taskId} was cancelled.`);
+            return;
+          }
 
           let resultText = `Task ${tags.includes("completed") ? "completed" : "failed"}.`;
           try {
@@ -41,7 +50,19 @@ export class ResultPoller {
             // Could not read result — use default message
           }
 
-          onComplete(resultText);
+          await onComplete(resultText);
+
+          // Mark as delivered so recovery won't re-deliver
+          try {
+            await this.munin.write(
+              `tasks/${taskId}`,
+              "delivery",
+              `Delivered to Telegram at ${new Date().toISOString()}`,
+              ["delivered", `instance:${config.instanceId}`]
+            );
+          } catch {
+            // Best-effort — delivery already happened
+          }
         }
       } catch (err) {
         console.error(`Poll error for ${taskId}:`, err);
@@ -54,7 +75,7 @@ export class ResultPoller {
     // Set max duration timeout
     const timeout = setTimeout(() => {
       this.stopPolling(taskId);
-      onComplete(
+      void onComplete(
         `Task ${taskId} timed out after ${Math.round(config.maxPollDurationMs / 60000)} minutes of polling. Check Munin for status.`
       );
     }, config.maxPollDurationMs);

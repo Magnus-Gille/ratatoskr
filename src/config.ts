@@ -12,6 +12,7 @@ export const config = {
   muninApiKey: process.env.MUNIN_API_KEY || "",
   pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || "30000"),
   maxPollDurationMs: parseInt(process.env.MAX_POLL_DURATION_MS || "7200000"),
+  instanceId: process.env.RATATOSKR_INSTANCE_ID || "default",
 };
 
 export function validateConfig(): void {

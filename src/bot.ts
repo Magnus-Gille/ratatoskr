@@ -4,6 +4,7 @@ import { MuninClient } from "./munin-client.js";
 import { ResultPoller } from "./result-poller.js";
 import { gatherContext, triage } from "./concierge.js";
 import { submitTask } from "./task-writer.js";
+import { truncateResult } from "./telegram-util.js";
 
 interface ConversationEntry {
   role: "user" | "assistant";
@@ -17,7 +18,7 @@ interface ConversationState {
 
 const CONVERSATION_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_HISTORY = 5;
-const TELEGRAM_MAX_LENGTH = 4096;
+const CONVERSATION_NAMESPACE = "ratatoskr/conversations";
 
 function formatDuration(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
@@ -25,11 +26,47 @@ function formatDuration(seconds: number): string {
   return `${Math.round(seconds / 3600)}h`;
 }
 
-function truncateResult(text: string, taskId: string): string {
-  const footer = `\n\n---\nFull result: tasks/${taskId}/result in Munin`;
-  const maxContent = TELEGRAM_MAX_LENGTH - footer.length - 10;
-  if (text.length <= maxContent) return text + footer;
-  return text.slice(0, maxContent) + "..." + footer;
+async function loadConversation(
+  munin: MuninClient,
+  chatId: string
+): Promise<ConversationState | null> {
+  try {
+    const entry = await munin.read(CONVERSATION_NAMESPACE, chatId);
+    if (!entry) return null;
+    const state: ConversationState = JSON.parse(entry.content);
+    if (Date.now() - state.lastActivity > CONVERSATION_TTL_MS) return null;
+    return state;
+  } catch {
+    return null;
+  }
+}
+
+async function saveConversation(
+  munin: MuninClient,
+  chatId: string,
+  state: ConversationState
+): Promise<void> {
+  try {
+    await munin.write(
+      CONVERSATION_NAMESPACE,
+      chatId,
+      JSON.stringify(state),
+      ["conversation", `instance:${config.instanceId}`]
+    );
+  } catch (err) {
+    console.error(`Failed to persist conversation for ${chatId}:`, err);
+  }
+}
+
+async function deleteConversation(
+  munin: MuninClient,
+  chatId: string
+): Promise<void> {
+  try {
+    await munin.write(CONVERSATION_NAMESPACE, chatId, "{}", ["expired"]);
+  } catch {
+    // Best-effort cleanup
+  }
 }
 
 export function createBot(
@@ -37,12 +74,12 @@ export function createBot(
   poller: ResultPoller
 ): Bot {
   const bot = new Bot(config.telegramBotToken);
+  // In-memory cache, backed by Munin persistence
   const conversations = new Map<string, ConversationState>();
 
   function isAllowed(ctx: Context): boolean {
     const userId = ctx.from?.id?.toString();
     if (!userId || !config.allowedUsers.includes(userId)) return false;
-    // Only allow private chats to prevent leaking results into groups
     if (ctx.chat?.type !== "private") return false;
     return true;
   }
@@ -51,21 +88,30 @@ export function createBot(
     console.error("Bot error:", err);
   });
 
-  function getConversation(chatId: string): ConversationEntry[] {
-    const state = conversations.get(chatId);
-    if (!state) return [];
-    if (Date.now() - state.lastActivity > CONVERSATION_TTL_MS) {
-      conversations.delete(chatId);
-      return [];
+  async function getConversation(chatId: string): Promise<ConversationEntry[]> {
+    // Check in-memory cache first
+    const cached = conversations.get(chatId);
+    if (cached) {
+      if (Date.now() - cached.lastActivity > CONVERSATION_TTL_MS) {
+        conversations.delete(chatId);
+        return [];
+      }
+      return cached.messages;
     }
-    return state.messages;
+    // Fall back to Munin
+    const stored = await loadConversation(munin, chatId);
+    if (stored) {
+      conversations.set(chatId, stored);
+      return stored.messages;
+    }
+    return [];
   }
 
-  function addToConversation(
+  async function addToConversation(
     chatId: string,
     role: "user" | "assistant",
     content: string
-  ): void {
+  ): Promise<void> {
     let state = conversations.get(chatId);
     if (!state || Date.now() - state.lastActivity > CONVERSATION_TTL_MS) {
       state = { messages: [], lastActivity: Date.now() };
@@ -76,10 +122,12 @@ export function createBot(
     }
     state.lastActivity = Date.now();
     conversations.set(chatId, state);
+    await saveConversation(munin, chatId, state);
   }
 
-  function clearConversation(chatId: string): void {
+  async function clearConversation(chatId: string): Promise<void> {
     conversations.delete(chatId);
+    await deleteConversation(munin, chatId);
   }
 
   // --- Commands ---
@@ -243,13 +291,13 @@ Or just send a message and the concierge will triage it.`
     const message = ctx.message.text;
 
     try {
-      const history = getConversation(chatId);
+      const history = await getConversation(chatId);
       const muninContext = await gatherContext(munin);
       const result = await triage(message, history, muninContext);
 
       switch (result.action) {
         case "ready": {
-          clearConversation(chatId);
+          await clearConversation(chatId);
           const taskId = await submitTask(
             {
               ...result.task,
@@ -274,13 +322,13 @@ Or just send a message and the concierge will triage it.`
           break;
         }
         case "clarify": {
-          addToConversation(chatId, "user", message);
-          addToConversation(chatId, "assistant", result.question);
+          await addToConversation(chatId, "user", message);
+          await addToConversation(chatId, "assistant", result.question);
           await ctx.reply(result.question);
           break;
         }
         case "answer": {
-          clearConversation(chatId);
+          await clearConversation(chatId);
           await ctx.reply(result.reply);
           break;
         }
