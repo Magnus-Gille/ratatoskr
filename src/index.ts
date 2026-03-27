@@ -17,6 +17,8 @@ const bot = createBot(munin, poller);
 
 let botConnected = false;
 
+app.use(express.json());
+
 app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
@@ -24,6 +26,25 @@ app.get("/health", (_req, res) => {
     bot_connected: botConnected,
     active_polls: poller.activePollCount,
   });
+});
+
+app.post("/api/send", async (req, res) => {
+  const { chat_id, text } = req.body ?? {};
+  if (typeof chat_id !== "number" || typeof text !== "string" || !text) {
+    res.status(400).json({ error: "chat_id (number) and text (string) are required" });
+    return;
+  }
+  if (!config.allowedUsers.includes(chat_id.toString())) {
+    res.status(403).json({ error: "chat_id not in allowed users list" });
+    return;
+  }
+  try {
+    await bot.api.sendMessage(chat_id, text);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Failed to send Telegram message:", err);
+    res.status(500).json({ error: String(err) });
+  }
 });
 
 const server = app.listen(config.port, config.host, () => {
