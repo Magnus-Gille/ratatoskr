@@ -63,7 +63,7 @@ async function deleteConversation(
   chatId: string
 ): Promise<void> {
   try {
-    await munin.write(CONVERSATION_NAMESPACE, chatId, "{}", ["expired"]);
+    await munin.write(CONVERSATION_NAMESPACE, chatId, JSON.stringify({ messages: [], lastActivity: 0 }), ["expired"]);
   } catch {
     // Best-effort cleanup
   }
@@ -100,7 +100,7 @@ export function createBot(
     }
     // Fall back to Munin
     const stored = await loadConversation(munin, chatId);
-    if (stored) {
+    if (stored?.messages) {
       conversations.set(chatId, stored);
       return stored.messages;
     }
