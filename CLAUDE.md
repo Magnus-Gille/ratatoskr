@@ -84,6 +84,7 @@ MUNIN_API_KEY=<same key Munin/Hugin use>
 | `POLL_INTERVAL_MS` | `30000` | How often to check task results |
 | `MAX_POLL_DURATION_MS` | `7200000` | Stop polling after this (2x default task timeout) |
 | `RATATOSKR_INSTANCE_ID` | `default` | Instance identifier for multi-instance isolation |
+| `REPOS_BASE_PATH` | `/home/magnus/repos` | Base path for resolving `repo:<name>` context to filesystem paths |
 
 ## Concierge design
 

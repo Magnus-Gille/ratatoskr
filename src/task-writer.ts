@@ -25,8 +25,21 @@ function generateTaskId(title: string): string {
   return `${date}-${time}-${slugify(title)}`;
 }
 
+function resolveWorkingDirectory(context: string): string | null {
+  const match = context.match(/^repo:(.+)$/);
+  if (match) {
+    return `${config.reposBasePath}/${match[1]}`;
+  }
+  return null;
+}
+
 function formatTaskMarkdown(submission: TaskSubmission): string {
   const now = new Date().toISOString();
+  const workdir = resolveWorkingDirectory(submission.context);
+  const prompt = workdir
+    ? `Working directory: ${workdir}\n\n${submission.prompt}`
+    : submission.prompt;
+
   return `## Task
 
 **Runtime:** claude
@@ -38,7 +51,7 @@ function formatTaskMarkdown(submission: TaskSubmission): string {
 
 ### Prompt
 
-${submission.prompt}
+${prompt}
 `;
 }
 

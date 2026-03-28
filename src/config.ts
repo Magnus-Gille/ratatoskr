@@ -13,6 +13,7 @@ export const config = {
   pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || "30000"),
   maxPollDurationMs: parseInt(process.env.MAX_POLL_DURATION_MS || "7200000"),
   instanceId: process.env.RATATOSKR_INSTANCE_ID || "default",
+  reposBasePath: process.env.REPOS_BASE_PATH || "/home/magnus/repos",
 };
 
 export function validateConfig(): void {
