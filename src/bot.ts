@@ -5,6 +5,7 @@ import { ResultPoller } from "./result-poller.js";
 import { gatherContext, triage } from "./concierge.js";
 import { submitTask } from "./task-writer.js";
 import { truncateResult } from "./telegram-util.js";
+import { MessageAggregator } from "./message-aggregator.js";
 
 interface ConversationEntry {
   role: "user" | "assistant";
@@ -282,63 +283,86 @@ Or just send a message and the concierge will triage it.`
     }
   });
 
-  // --- Regular messages → concierge ---
+  // --- Regular messages → concierge (with debounce aggregation) ---
+  //
+  // Telegram splits messages longer than 4096 characters into sequential
+  // fragments.  The aggregator collects fragments within a short window and
+  // joins them before the concierge sees the text, so long messages are never
+  // accidentally split into separate tasks.
+
+  // Keep a map from chatId to the most-recent grammy Context so that the
+  // aggregator callback can call ctx.reply on the right chat.
+  const latestCtx = new Map<string, Context>();
+
+  const AGGREGATION_WINDOW_MS = 2500;
+
+  const aggregator = new MessageAggregator(
+    AGGREGATION_WINDOW_MS,
+    (chatId, message) => {
+      const ctx = latestCtx.get(chatId);
+      if (!ctx) return;
+
+      (async () => {
+        try {
+          const history = await getConversation(chatId);
+          const muninContext = await gatherContext(munin);
+          const result = await triage(message, history, muninContext);
+
+          switch (result.action) {
+            case "ready": {
+              await clearConversation(chatId);
+              const taskId = await submitTask(
+                {
+                  ...result.task,
+                  chatId,
+                },
+                munin
+              );
+              const duration = formatDuration(result.task.timeout);
+              await ctx.reply(
+                `Got it, submitting to ${result.task.context}. ~${duration}.`
+              );
+              poller.startPolling(taskId, async (pollResult) => {
+                try {
+                  await ctx.reply(truncateResult(pollResult, taskId));
+                } catch (err) {
+                  console.error(
+                    `Failed to deliver result for ${taskId}:`,
+                    err
+                  );
+                }
+              });
+              break;
+            }
+            case "clarify": {
+              await addToConversation(chatId, "user", message);
+              await addToConversation(chatId, "assistant", result.question);
+              await ctx.reply(result.question);
+              break;
+            }
+            case "answer": {
+              await clearConversation(chatId);
+              await ctx.reply(result.reply);
+              break;
+            }
+          }
+        } catch (err) {
+          console.error("Concierge error:", err);
+          await ctx.reply(
+            "Something went wrong with the concierge. Try /raw <prompt> to bypass."
+          );
+        }
+      })();
+    }
+  );
 
   bot.on("message:text", async (ctx) => {
     if (!isAllowed(ctx)) return;
 
     const chatId = ctx.chat.id.toString();
-    const message = ctx.message.text;
-
-    try {
-      const history = await getConversation(chatId);
-      const muninContext = await gatherContext(munin);
-      const result = await triage(message, history, muninContext);
-
-      switch (result.action) {
-        case "ready": {
-          await clearConversation(chatId);
-          const taskId = await submitTask(
-            {
-              ...result.task,
-              chatId,
-            },
-            munin
-          );
-          const duration = formatDuration(result.task.timeout);
-          await ctx.reply(
-            `Got it, submitting to ${result.task.context}. ~${duration}.`
-          );
-          poller.startPolling(taskId, async (pollResult) => {
-            try {
-              await ctx.reply(truncateResult(pollResult, taskId));
-            } catch (err) {
-              console.error(
-                `Failed to deliver result for ${taskId}:`,
-                err
-              );
-            }
-          });
-          break;
-        }
-        case "clarify": {
-          await addToConversation(chatId, "user", message);
-          await addToConversation(chatId, "assistant", result.question);
-          await ctx.reply(result.question);
-          break;
-        }
-        case "answer": {
-          await clearConversation(chatId);
-          await ctx.reply(result.reply);
-          break;
-        }
-      }
-    } catch (err) {
-      console.error("Concierge error:", err);
-      await ctx.reply(
-        "Something went wrong with the concierge. Try /raw <prompt> to bypass."
-      );
-    }
+    // Always keep the freshest ctx so replies go to the right update.
+    latestCtx.set(chatId, ctx);
+    aggregator.push(chatId, ctx.message.text);
   });
 
   return bot;
