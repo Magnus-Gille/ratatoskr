@@ -1,17 +1,29 @@
 # Ratatoskr Status
 
-**Last session:** 2026-03-28
+**Last session:** 2026-04-04
 **Branch:** main
 
 ## Completed This Session
-- `5aff38c` fix: inject working directory into repo tasks
-  - `resolveWorkingDirectory()` maps `repo:<name>` → `/home/magnus/repos/<name>`
-  - `REPOS_BASE_PATH` env var (default `/home/magnus/repos`) added to config
-- `38444e0` fix: guard against undefined messages in conversation state
-  - `deleteConversation` was writing `"{}"` to Munin; loading it back gave `messages: undefined`, crashing `triage()` on `.map()`
-  - Fixed in both `getConversation` (guard) and `deleteConversation` (write valid state)
-- Cloned `gille-ai` to Pi at `/home/magnus/repos/gille-ai`
-- Added `grimnir-bot` as collaborator to `Magnus-Gille/gille-ai` (push access)
+- `1f3d3ec` feat: soul definition + result formatting (Hugin task)
+  - Created `src/soul.ts` with `RATATOSKR_SOUL` constant
+  - `extractResultBody()`, `formatResult()`, `shortId()`, `STATUS_MESSAGES` in telegram-util.ts
+  - Soul injected into concierge system prompt
+  - All result delivery paths switched from raw `truncateResult` to `formatResult`
+- `ff58dea` feat: reply-to-message awareness (Hugin task)
+  - `MessageTracker` maps outbound Telegram message IDs to context
+  - Concierge receives reply context when user swipe-replies
+- `20bd1e6` feat: photo/image support (Hugin task)
+  - `message:photo` handler downloads images via Telegram file API
+  - Concierge uses Haiku vision (multimodal) to interpret images
+  - Images stay at concierge layer — described in text for Hugin tasks
+- `25151ff` fix: strip markdown from Hugin responses
+  - `stripMarkdown()` converts all markdown syntax to plain text
+- `1dc8ba2` fix: surface concierge error reasons in Telegram
+  - Classifies errors (rate limit, timeout, parse failure, etc.) instead of generic message
+- `9e4442a` feat: summarize task results via Haiku
+  - `summarizeResult()` sends stripped body through Haiku with soul prompt
+  - Produces terse 2-3 sentence summaries instead of verbose reports
+  - Falls back to stripped body if summarization fails
 
 ## Completed Previously
 - Poll recovery, delivery confirmation, conversation persistence (`659a1ab`)
@@ -20,10 +32,10 @@
 - Deployed on Pi (huginmunin), systemd service, Heimdall monitoring
 
 ## In Progress
-- Nothing — all fixes deployed
+- Nothing — all changes deployed
 
 ## Next Steps
-- For each new private repo Hugin needs to touch: add `grimnir-bot` as collaborator + clone on Pi
-- Consider adding photo/voice/document handling (currently silently ignored)
-- Consider "task picked up" intermediate notifications
-- Consider rate limiting / debounce on concierge calls
+- Test the full pipeline end-to-end: submit a task via Telegram, verify result comes back summarized in Ratatoskr's voice
+- Consider "task picked up" intermediate notifications (running status)
+- Consider voice message support
+- Consider document/file handling

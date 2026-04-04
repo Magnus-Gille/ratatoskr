@@ -25,13 +25,17 @@ Part of the Grimnir system: **Munin** (memory), **Hugin** (task dispatcher), **R
 ### Components
 
 - `src/index.ts` — Express health endpoint + bot startup + poll recovery
-- `src/bot.ts` — Telegram bot setup, message handler, allowlist, conversation persistence
-- `src/concierge.ts` — Intent triage via Claude Haiku API
+- `src/bot.ts` — Telegram bot setup, message/photo handlers, allowlist, conversation persistence
+- `src/concierge.ts` — Intent triage via Claude Haiku API (multimodal: text + images), result summarization
+- `src/soul.ts` — `RATATOSKR_SOUL` constant defining Ratatoskr's voice/personality for all Telegram output
 - `src/task-writer.ts` — Format task markdown, write to Munin (with instance tag)
 - `src/result-poller.ts` — Poll Munin for task results, delivery confirmation
 - `src/recovery.ts` — Startup recovery: reattach polls, deliver undelivered results
 - `src/munin-client.ts` — HTTP client for Munin JSON-RPC API
-- `src/telegram-util.ts` — Shared Telegram helpers (message truncation)
+- `src/telegram-util.ts` — Result formatting: metadata extraction, markdown stripping, summarization pipeline, truncation
+- `src/telegram-file.ts` — Download photos from Telegram's file API
+- `src/message-tracker.ts` — In-memory tracker mapping outbound Telegram message IDs to context (for reply awareness)
+- `src/message-aggregator.ts` — Debounce rapid Telegram message fragments into single logical messages
 - `src/config.ts` — Environment configuration
 
 ## How to build
@@ -98,4 +102,13 @@ It returns one of three actions:
 - `clarify` — ambiguous, here's a question to ask the user
 - `answer` — can be answered directly from context, no task needed
 
-Tone: casual and terse (matches phone context).
+Tone is defined by `RATATOSKR_SOUL` in `src/soul.ts` — casual, terse, warm, plain text only.
+
+### Result formatting pipeline
+
+When a Hugin task completes, the result goes through:
+1. **Extract** — `extractResultBody()` pulls content from under `### Response`, strips Hugin metadata (exit code, timestamps, cost, etc.)
+2. **Strip** — `stripMarkdown()` converts markdown to plain text
+3. **Summarize** — `summarizeResult()` sends the body through Haiku with the soul prompt for a terse 2-3 sentence summary (~$0.001/call)
+4. **Fallback** — if summarization fails, uses the stripped body as-is
+5. **Truncate** — `truncateForTelegram()` fits to Telegram's 4096 char limit
