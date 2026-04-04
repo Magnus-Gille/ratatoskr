@@ -30,6 +30,18 @@ function formatDuration(seconds: number): string {
   return `${Math.round(seconds / 3600)}h`;
 }
 
+function conciergeErrorReason(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/rate.?limit|429/i.test(msg)) return "API rate limit, wait a moment";
+  if (/timeout|ETIMEDOUT|ECONNABORTED/i.test(msg)) return "API timed out";
+  if (/ECONNREFUSED|ENOTFOUND|fetch failed/i.test(msg)) return "can't reach API";
+  if (/Munin/i.test(msg)) return "Munin unreachable";
+  if (/JSON|parse|Unexpected token/i.test(msg)) return "Haiku returned gibberish";
+  if (/auth|401|403/i.test(msg)) return "API auth error";
+  if (/5\d{2}|server error/i.test(msg)) return "API server error";
+  return msg.length > 80 ? msg.slice(0, 80) + "..." : msg;
+}
+
 async function loadConversation(
   munin: MuninClient,
   chatId: string
@@ -383,8 +395,9 @@ Or just send a message and the concierge will triage it.`
           }
         } catch (err) {
           console.error("Concierge error:", err);
+          const reason = conciergeErrorReason(err);
           await ctx.reply(
-            "Something went wrong with the concierge. Try /raw <prompt> to bypass."
+            `Concierge error: ${reason}. Try /raw <prompt> to bypass.`
           );
         }
       })();
@@ -472,7 +485,8 @@ Or just send a message and the concierge will triage it.`
       }
     } catch (err) {
       console.error("Photo handler error:", err);
-      await ctx.reply("Couldn't process that image. Try sending text instead, or /raw <prompt>.");
+      const reason = conciergeErrorReason(err);
+      await ctx.reply(`Couldn't process that image: ${reason}. Try /raw <prompt>.`);
     }
   });
 
