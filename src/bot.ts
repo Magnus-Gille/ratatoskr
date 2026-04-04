@@ -8,6 +8,7 @@ import { formatResult } from "./telegram-util.js";
 import { MessageAggregator } from "./message-aggregator.js";
 import { MessageTracker } from "./message-tracker.js";
 import type { TrackedMessage } from "./message-tracker.js";
+import { downloadPhoto } from "./telegram-file.js";
 
 interface ConversationEntry {
   role: "user" | "assistant";
@@ -389,6 +390,91 @@ Or just send a message and the concierge will triage it.`
       })();
     }
   );
+
+  bot.on("message:photo", async (ctx) => {
+    if (!isAllowed(ctx)) return;
+
+    const chatId = ctx.chat.id.toString();
+    latestCtx.set(chatId, ctx);
+
+    // Get the largest photo (last in array = highest resolution)
+    const photos = ctx.message.photo;
+    const largest = photos[photos.length - 1];
+
+    try {
+      const image = await downloadPhoto(ctx.api, largest.file_id);
+      const caption = ctx.message.caption || "";
+      const history = await getConversation(chatId);
+      const muninContext = await gatherContext(munin);
+
+      // Check if this is a reply to a previous message
+      const replyTo = ctx.message.reply_to_message?.message_id;
+      const replyCtx = replyTo ? messageTracker.lookup(replyTo) : null;
+
+      const result = await triage(
+        caption,
+        history,
+        muninContext,
+        replyCtx,
+        [image]
+      );
+
+      // Store in conversation history with placeholder (no base64)
+      const historyEntry = caption
+        ? `[sent a photo with caption: "${caption}"]`
+        : "[sent a photo]";
+
+      switch (result.action) {
+        case "ready": {
+          await clearConversation(chatId);
+          const taskId = await submitTask(
+            { ...result.task, chatId },
+            munin
+          );
+          const duration = formatDuration(result.task.timeout);
+          const sent = await ctx.reply(
+            `Got it, submitting to ${result.task.context}. ~${duration}.`
+          );
+          messageTracker.track(sent.message_id, { type: "ack", taskId });
+          poller.startPolling(taskId, async (pollResult) => {
+            try {
+              const sent = await ctx.reply(formatResult(pollResult, taskId));
+              messageTracker.track(sent.message_id, {
+                type: "result",
+                taskId,
+                snippet: pollResult.slice(0, 200),
+              });
+            } catch (err) {
+              console.error(`Failed to deliver result for ${taskId}:`, err);
+            }
+          });
+          break;
+        }
+        case "clarify": {
+          await addToConversation(chatId, "user", historyEntry);
+          await addToConversation(chatId, "assistant", result.question);
+          const sent = await ctx.reply(result.question);
+          messageTracker.track(sent.message_id, {
+            type: "clarify",
+            snippet: result.question.slice(0, 200),
+          });
+          break;
+        }
+        case "answer": {
+          await clearConversation(chatId);
+          const sent = await ctx.reply(result.reply);
+          messageTracker.track(sent.message_id, {
+            type: "answer",
+            snippet: result.reply.slice(0, 200),
+          });
+          break;
+        }
+      }
+    } catch (err) {
+      console.error("Photo handler error:", err);
+      await ctx.reply("Couldn't process that image. Try sending text instead, or /raw <prompt>.");
+    }
+  });
 
   bot.on("message:text", async (ctx) => {
     if (!isAllowed(ctx)) return;

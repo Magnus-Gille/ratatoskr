@@ -144,6 +144,106 @@ describe("concierge", () => {
       expect(callArgs.system).toContain('task "fix-navbar-css"');
       expect(callArgs.system).toContain("That didn't work.");
     });
+
+    it("should send multimodal content when images are provided", async () => {
+      mockCreate.mockResolvedValue({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              action: "ready",
+              task: {
+                prompt: "Fix the error shown in the screenshot: TypeError on line 42",
+                context: "repo:myapp",
+                timeout: 300,
+                title: "fix-type-error",
+              },
+            }),
+          },
+        ],
+      });
+
+      const images = [
+        { base64: "abc123base64data", mediaType: "image/jpeg" },
+      ];
+
+      await triage("fix this error", [], "No context", null, images);
+
+      const callArgs = mockCreate.mock.calls[0][0];
+      const lastMessage = callArgs.messages[callArgs.messages.length - 1];
+
+      // The last user message should be an array of content blocks
+      expect(Array.isArray(lastMessage.content)).toBe(true);
+
+      // First block should be the image
+      expect(lastMessage.content[0].type).toBe("image");
+      expect(lastMessage.content[0].source.type).toBe("base64");
+      expect(lastMessage.content[0].source.media_type).toBe("image/jpeg");
+      expect(lastMessage.content[0].source.data).toBe("abc123base64data");
+
+      // Second block should be the text
+      expect(lastMessage.content[1].type).toBe("text");
+      expect(lastMessage.content[1].text).toBe("fix this error");
+    });
+
+    it("should use 'What's in this image?' as fallback text when no caption provided", async () => {
+      mockCreate.mockResolvedValue({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ action: "answer", reply: "I see a dashboard." }),
+          },
+        ],
+      });
+
+      const images = [{ base64: "imgdata", mediaType: "image/png" }];
+
+      await triage("", [], "No context", null, images);
+
+      const callArgs = mockCreate.mock.calls[0][0];
+      const lastMessage = callArgs.messages[callArgs.messages.length - 1];
+      const textBlock = lastMessage.content.find(
+        (b: { type: string }) => b.type === "text"
+      );
+      expect(textBlock.text).toBe("What's in this image?");
+    });
+
+    it("should send plain string message when no images provided", async () => {
+      mockCreate.mockResolvedValue({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ action: "answer", reply: "Hello!" }),
+          },
+        ],
+      });
+
+      await triage("hello", [], "No context");
+
+      const callArgs = mockCreate.mock.calls[0][0];
+      const lastMessage = callArgs.messages[callArgs.messages.length - 1];
+      // No images: content should be the plain string
+      expect(typeof lastMessage.content).toBe("string");
+      expect(lastMessage.content).toBe("hello");
+    });
+
+    it("should include image handling instructions in the system prompt", async () => {
+      mockCreate.mockResolvedValue({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ action: "answer", reply: "ok" }),
+          },
+        ],
+      });
+
+      const images = [{ base64: "data", mediaType: "image/jpeg" }];
+      await triage("", [], "No context", null, images);
+
+      const callArgs = mockCreate.mock.calls[0][0];
+      expect(callArgs.system).toContain("image");
+      expect(callArgs.system).toContain("screenshot");
+    });
   });
 
   describe("gatherContext", () => {

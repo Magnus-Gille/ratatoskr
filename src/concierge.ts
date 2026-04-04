@@ -36,6 +36,11 @@ Respond with JSON only. One of three actions:
    {"action": "answer", "reply": "<your reply>"}
    - Use for status checks, quick facts from Munin context, greetings, etc.
 
+When the user sends an image (screenshot, photo, etc.):
+- If it's a bug/error screenshot with a clear ask: classify as "ready" and describe what the image shows in the enriched task prompt. The Hugin agent cannot see the image, so your description must be detailed enough to act on.
+- If the image is ambiguous and no caption explains intent: classify as "clarify" and ask what they want done with it.
+- If you can answer directly from the image (e.g. "what does this error mean?"): classify as "answer".
+
 If a Reply Context section is present, the user is responding to a specific previous message. Use that context to understand what they're referring to — e.g. "run this again" means resubmit the referenced task, "that's wrong" means the referenced result needs correction.
 
 Always respond with valid JSON, no markdown fences.`;
@@ -97,16 +102,37 @@ export async function triage(
   message: string,
   conversationHistory: Array<{ role: "user" | "assistant"; content: string }>,
   muninContext: string,
-  replyContext?: TrackedMessage | null
+  replyContext?: TrackedMessage | null,
+  images?: Array<{ base64: string; mediaType: string }>
 ): Promise<TriageResult> {
   const client = new Anthropic({ apiKey: config.anthropicApiKey });
+
+  // Build the final user message
+  const userContent: Anthropic.ContentBlockParam[] = [];
+
+  // Add images first (so the model "sees" them before the text)
+  if (images?.length) {
+    for (const img of images) {
+      userContent.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: img.mediaType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+          data: img.base64,
+        },
+      });
+    }
+  }
+
+  // Add the text (caption or empty prompt)
+  userContent.push({ type: "text", text: message || "What's in this image?" });
 
   const messages: Anthropic.MessageParam[] = [
     ...conversationHistory.map((m) => ({
       role: m.role as "user" | "assistant",
       content: m.content,
     })),
-    { role: "user", content: message },
+    { role: "user", content: images?.length ? userContent : message },
   ];
 
   let systemContent = `${SYSTEM_PROMPT}\n\n## Current Munin Context\n${muninContext}`;
