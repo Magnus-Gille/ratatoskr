@@ -6,6 +6,8 @@ import { gatherContext, triage } from "./concierge.js";
 import { submitTask } from "./task-writer.js";
 import { formatResult } from "./telegram-util.js";
 import { MessageAggregator } from "./message-aggregator.js";
+import { MessageTracker } from "./message-tracker.js";
+import type { TrackedMessage } from "./message-tracker.js";
 
 interface ConversationEntry {
   role: "user" | "assistant";
@@ -77,6 +79,8 @@ export function createBot(
   const bot = new Bot(config.telegramBotToken);
   // In-memory cache, backed by Munin persistence
   const conversations = new Map<string, ConversationState>();
+  const messageTracker = new MessageTracker();
+  const pendingReplyContext = new Map<string, TrackedMessage>();
 
   function isAllowed(ctx: Context): boolean {
     const userId = ctx.from?.id?.toString();
@@ -226,10 +230,17 @@ Or just send a message and the concierge will triage it.`
         },
         munin
       );
-      await ctx.reply(`Submitted to scratch. Task: ${taskId}`);
+      const ackRaw = await ctx.reply(`Submitted to scratch. Task: ${taskId}`);
+      messageTracker.track(ackRaw.message_id, { type: "ack", taskId });
       poller.startPolling(taskId, async (result) => {
         try {
-          await ctx.reply(formatResult(result, taskId));
+          const resultText = formatResult(result, taskId);
+          const sent = await ctx.reply(resultText);
+          messageTracker.track(sent.message_id, {
+            type: "result",
+            taskId,
+            snippet: resultText.slice(0, 200),
+          });
         } catch (err) {
           console.error(`Failed to deliver result for ${taskId}:`, err);
         }
@@ -269,10 +280,17 @@ Or just send a message and the concierge will triage it.`
         },
         munin
       );
-      await ctx.reply(`Submitted to repo:${repoName}. Task: ${taskId}`);
+      const ackRepo = await ctx.reply(`Submitted to repo:${repoName}. Task: ${taskId}`);
+      messageTracker.track(ackRepo.message_id, { type: "ack", taskId });
       poller.startPolling(taskId, async (result) => {
         try {
-          await ctx.reply(formatResult(result, taskId));
+          const resultText = formatResult(result, taskId);
+          const sent = await ctx.reply(resultText);
+          messageTracker.track(sent.message_id, {
+            type: "result",
+            taskId,
+            snippet: resultText.slice(0, 200),
+          });
         } catch (err) {
           console.error(`Failed to deliver result for ${taskId}:`, err);
         }
@@ -306,7 +324,9 @@ Or just send a message and the concierge will triage it.`
         try {
           const history = await getConversation(chatId);
           const muninContext = await gatherContext(munin);
-          const result = await triage(message, history, muninContext);
+          const replyCtx = pendingReplyContext.get(chatId) ?? null;
+          pendingReplyContext.delete(chatId);
+          const result = await triage(message, history, muninContext, replyCtx);
 
           switch (result.action) {
             case "ready": {
@@ -319,12 +339,18 @@ Or just send a message and the concierge will triage it.`
                 munin
               );
               const duration = formatDuration(result.task.timeout);
-              await ctx.reply(
-                `Got it, submitting to ${result.task.context}. ~${duration}.`
-              );
+              const ackText = `Got it, submitting to ${result.task.context}. ~${duration}.`;
+              const ackSent = await ctx.reply(ackText);
+              messageTracker.track(ackSent.message_id, { type: "ack", taskId });
               poller.startPolling(taskId, async (pollResult) => {
                 try {
-                  await ctx.reply(formatResult(pollResult, taskId));
+                  const resultText = formatResult(pollResult, taskId);
+                  const sent = await ctx.reply(resultText);
+                  messageTracker.track(sent.message_id, {
+                    type: "result",
+                    taskId,
+                    snippet: resultText.slice(0, 200),
+                  });
                 } catch (err) {
                   console.error(
                     `Failed to deliver result for ${taskId}:`,
@@ -337,12 +363,20 @@ Or just send a message and the concierge will triage it.`
             case "clarify": {
               await addToConversation(chatId, "user", message);
               await addToConversation(chatId, "assistant", result.question);
-              await ctx.reply(result.question);
+              const clarifySent = await ctx.reply(result.question);
+              messageTracker.track(clarifySent.message_id, {
+                type: "clarify",
+                snippet: result.question.slice(0, 200),
+              });
               break;
             }
             case "answer": {
               await clearConversation(chatId);
-              await ctx.reply(result.reply);
+              const answerSent = await ctx.reply(result.reply);
+              messageTracker.track(answerSent.message_id, {
+                type: "answer",
+                snippet: result.reply.slice(0, 200),
+              });
               break;
             }
           }
@@ -362,6 +396,14 @@ Or just send a message and the concierge will triage it.`
     const chatId = ctx.chat.id.toString();
     // Always keep the freshest ctx so replies go to the right update.
     latestCtx.set(chatId, ctx);
+
+    // Check if this message is a reply to one of our tracked messages.
+    const replyTo = ctx.message.reply_to_message?.message_id;
+    const replyContext = replyTo ? messageTracker.lookup(replyTo) : null;
+    if (replyContext) {
+      pendingReplyContext.set(chatId, replyContext);
+    }
+
     aggregator.push(chatId, ctx.message.text);
   });
 

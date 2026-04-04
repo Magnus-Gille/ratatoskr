@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { config } from "./config.js";
 import { MuninClient } from "./munin-client.js";
 import { RATATOSKR_SOUL } from "./soul.js";
+import type { TrackedMessage } from "./message-tracker.js";
 
 export type TriageResult =
   | {
@@ -34,6 +35,8 @@ Respond with JSON only. One of three actions:
 3. **answer** — Can be answered directly from context without a task.
    {"action": "answer", "reply": "<your reply>"}
    - Use for status checks, quick facts from Munin context, greetings, etc.
+
+If a Reply Context section is present, the user is responding to a specific previous message. Use that context to understand what they're referring to — e.g. "run this again" means resubmit the referenced task, "that's wrong" means the referenced result needs correction.
 
 Always respond with valid JSON, no markdown fences.`;
 
@@ -93,7 +96,8 @@ export async function gatherContext(
 export async function triage(
   message: string,
   conversationHistory: Array<{ role: "user" | "assistant"; content: string }>,
-  muninContext: string
+  muninContext: string,
+  replyContext?: TrackedMessage | null
 ): Promise<TriageResult> {
   const client = new Anthropic({ apiKey: config.anthropicApiKey });
 
@@ -105,10 +109,22 @@ export async function triage(
     { role: "user", content: message },
   ];
 
+  let systemContent = `${SYSTEM_PROMPT}\n\n## Current Munin Context\n${muninContext}`;
+
+  if (replyContext) {
+    const ref = replyContext.taskId
+      ? `the ${replyContext.type} for task "${replyContext.taskId}"`
+      : `a previous ${replyContext.type} message`;
+    systemContent += `\n\n## Reply Context\nThe user is replying to ${ref}.`;
+    if (replyContext.snippet) {
+      systemContent += ` That message said: "${replyContext.snippet}"`;
+    }
+  }
+
   const response = await client.messages.create({
     model: config.conciergeModel,
     max_tokens: 1024,
-    system: `${SYSTEM_PROMPT}\n\n## Current Munin Context\n${muninContext}`,
+    system: systemContent,
     messages,
   });
 

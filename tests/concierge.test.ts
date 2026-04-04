@@ -121,6 +121,29 @@ describe("concierge", () => {
       const result = await triage("hi", [], "No context");
       expect(result.action).toBe("answer");
     });
+
+    it("should inject reply context into the system prompt when provided", async () => {
+      mockCreate.mockResolvedValue({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ action: "answer", reply: "Resubmitting now." }),
+          },
+        ],
+      });
+
+      await triage("run this again", [], "No context", {
+        type: "result",
+        taskId: "fix-navbar-css",
+        snippet: "That didn't work.\n\nSyntax error on line 42.",
+        timestamp: Date.now(),
+      });
+
+      const callArgs = mockCreate.mock.calls[0][0];
+      expect(callArgs.system).toContain("Reply Context");
+      expect(callArgs.system).toContain('task "fix-navbar-css"');
+      expect(callArgs.system).toContain("That didn't work.");
+    });
   });
 
   describe("gatherContext", () => {
