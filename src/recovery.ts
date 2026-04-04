@@ -2,7 +2,7 @@ import { Api } from "grammy";
 import { config } from "./config.js";
 import { MuninClient, MuninQueryResult } from "./munin-client.js";
 import { ResultPoller } from "./result-poller.js";
-import { truncateResult } from "./telegram-util.js";
+import { formatResult, STATUS_MESSAGES } from "./telegram-util.js";
 
 /**
  * Parse chatId from a task's metadata header (before ### Prompt).
@@ -28,7 +28,7 @@ function makeDeliveryCallback(
 ): (result: string) => Promise<void> {
   return async (result: string) => {
     try {
-      await botApi.sendMessage(chatId, truncateResult(result, taskId));
+      await botApi.sendMessage(chatId, formatResult(result, taskId));
     } catch (err) {
       console.error(
         `Failed to deliver recovered result for ${taskId}:`,
@@ -119,7 +119,9 @@ export async function recoverActivePolls(
     if (!meta) continue;
 
     // Read result and deliver directly (no polling needed)
-    let resultText = `Task ${task.tags.includes("completed") ? "completed" : "failed"}.`;
+    let resultText = task.tags.includes("completed")
+      ? STATUS_MESSAGES.completedFallback
+      : STATUS_MESSAGES.failedFallback;
     try {
       const result = await munin.read(task.namespace, "result");
       if (result) resultText = result.content;
@@ -130,7 +132,7 @@ export async function recoverActivePolls(
     try {
       await botApi.sendMessage(
         meta.chatId,
-        truncateResult(resultText, taskId)
+        formatResult(resultText, taskId)
       );
       // Mark as delivered
       await munin.write(

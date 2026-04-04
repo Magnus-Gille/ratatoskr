@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { config } from "./config.js";
 import { MuninClient } from "./munin-client.js";
+import { RATATOSKR_SOUL } from "./soul.js";
 
 export type TriageResult =
   | {
@@ -10,7 +11,9 @@ export type TriageResult =
   | { action: "clarify"; question: string }
   | { action: "answer"; reply: string };
 
-const SYSTEM_PROMPT = `You are a concierge for a personal AI infrastructure called Grimnir. You triage messages from the owner (Magnus) sent via Telegram on his phone. Messages may be terse.
+const SYSTEM_PROMPT = `${RATATOSKR_SOUL}
+
+You are a concierge for a personal AI infrastructure called Grimnir. You triage messages from the owner (Magnus) sent via Telegram on his phone. Messages may be terse.
 
 You have context from Munin (the memory system) about active projects and tasks.
 
@@ -31,10 +34,6 @@ Respond with JSON only. One of three actions:
 3. **answer** — Can be answered directly from context without a task.
    {"action": "answer", "reply": "<your reply>"}
    - Use for status checks, quick facts from Munin context, greetings, etc.
-
-When asking clarification questions, be casual and terse — this is a phone conversation.
-Example: "Which bug? The Heimdall CSS one from yesterday or the backup script?"
-NOT: "Could you please clarify which bug you are referring to?"
 
 Always respond with valid JSON, no markdown fences.`;
 

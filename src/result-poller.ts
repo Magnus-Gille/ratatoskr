@@ -1,5 +1,6 @@
 import { config } from "./config.js";
 import { MuninClient } from "./munin-client.js";
+import { STATUS_MESSAGES } from "./telegram-util.js";
 
 export class ResultPoller {
   private activePolls: Map<string, NodeJS.Timeout> = new Map();
@@ -33,11 +34,13 @@ export class ResultPoller {
           this.stopPolling(taskId);
 
           if (tags.includes("cancelled")) {
-            await onComplete(`Task ${taskId} was cancelled.`);
+            await onComplete(STATUS_MESSAGES.cancelled(taskId));
             return;
           }
 
-          let resultText = `Task ${tags.includes("completed") ? "completed" : "failed"}.`;
+          let resultText = tags.includes("completed")
+            ? STATUS_MESSAGES.completedFallback
+            : STATUS_MESSAGES.failedFallback;
           try {
             const result = await this.munin.read(
               `tasks/${taskId}`,
@@ -76,7 +79,7 @@ export class ResultPoller {
     const timeout = setTimeout(() => {
       this.stopPolling(taskId);
       void onComplete(
-        `Task ${taskId} timed out after ${Math.round(config.maxPollDurationMs / 60000)} minutes of polling. Check Munin for status.`
+        STATUS_MESSAGES.pollTimeout(taskId, Math.round(config.maxPollDurationMs / 60000))
       );
     }, config.maxPollDurationMs);
     this.timeouts.set(taskId, timeout);

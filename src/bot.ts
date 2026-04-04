@@ -4,7 +4,7 @@ import { MuninClient } from "./munin-client.js";
 import { ResultPoller } from "./result-poller.js";
 import { gatherContext, triage } from "./concierge.js";
 import { submitTask } from "./task-writer.js";
-import { truncateResult } from "./telegram-util.js";
+import { formatResult } from "./telegram-util.js";
 import { MessageAggregator } from "./message-aggregator.js";
 
 interface ConversationEntry {
@@ -229,7 +229,7 @@ Or just send a message and the concierge will triage it.`
       await ctx.reply(`Submitted to scratch. Task: ${taskId}`);
       poller.startPolling(taskId, async (result) => {
         try {
-          await ctx.reply(truncateResult(result, taskId));
+          await ctx.reply(formatResult(result, taskId));
         } catch (err) {
           console.error(`Failed to deliver result for ${taskId}:`, err);
         }
@@ -272,7 +272,7 @@ Or just send a message and the concierge will triage it.`
       await ctx.reply(`Submitted to repo:${repoName}. Task: ${taskId}`);
       poller.startPolling(taskId, async (result) => {
         try {
-          await ctx.reply(truncateResult(result, taskId));
+          await ctx.reply(formatResult(result, taskId));
         } catch (err) {
           console.error(`Failed to deliver result for ${taskId}:`, err);
         }
@@ -324,7 +324,7 @@ Or just send a message and the concierge will triage it.`
               );
               poller.startPolling(taskId, async (pollResult) => {
                 try {
-                  await ctx.reply(truncateResult(pollResult, taskId));
+                  await ctx.reply(formatResult(pollResult, taskId));
                 } catch (err) {
                   console.error(
                     `Failed to deliver result for ${taskId}:`,

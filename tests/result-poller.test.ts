@@ -117,7 +117,7 @@ describe("ResultPoller", () => {
       poller.startPolling("timeout-task", async (r) => resolve(r));
     });
 
-    expect(result).toContain("timed out");
+    expect(result).toContain("Lost track");
   });
 
   it("should track active poll count", () => {
