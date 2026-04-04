@@ -112,6 +112,35 @@ export function formatResult(raw: string, taskId: string): string {
 }
 
 /**
+ * Async version of formatResult that summarizes the body via a provided summarizer
+ * (typically Haiku with the soul prompt). Falls back to stripMarkdown if summarization fails.
+ */
+export async function formatResultWithSummary(
+  raw: string,
+  taskId: string,
+  summarize: (body: string) => Promise<string>
+): Promise<string> {
+  const { body, failed } = extractResultBody(raw);
+
+  if (!body) {
+    return failed ? STATUS_MESSAGES.failedFallback : STATUS_MESSAGES.completedFallback;
+  }
+
+  let summary: string;
+  try {
+    summary = await summarize(stripMarkdown(body));
+  } catch {
+    summary = stripMarkdown(body);
+  }
+
+  if (failed) {
+    summary = `That didn't work.\n\n${summary}`;
+  }
+
+  return truncateForTelegram(summary, taskId);
+}
+
+/**
  * Terse lifecycle status messages.
  */
 export const STATUS_MESSAGES = {

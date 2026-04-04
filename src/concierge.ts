@@ -192,3 +192,23 @@ export async function triage(
 
   throw new Error(`Unexpected concierge response: ${text}`);
 }
+
+/**
+ * Summarize a task result body using Haiku with the Ratatoskr soul voice.
+ * Returns a terse 2-3 sentence summary suitable for Telegram.
+ */
+export async function summarizeResult(body: string): Promise<string> {
+  const client = new Anthropic({ apiKey: config.anthropicApiKey });
+
+  const response = await client.messages.create({
+    model: config.conciergeModel,
+    max_tokens: 512,
+    system: `${RATATOSKR_SOUL}
+
+Summarize this task result in 2-3 terse sentences. Lead with what was done, not the process. If there are code changes, mention what files changed and why. Skip file-by-file breakdowns, test counts, and implementation details. No bullet points, no headers, no markdown. Plain text only.`,
+    messages: [{ role: "user", content: body }],
+  });
+
+  const text = response.content[0].type === "text" ? response.content[0].text : "";
+  return text.trim() || body;
+}

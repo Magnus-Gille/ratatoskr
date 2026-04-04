@@ -2,9 +2,9 @@ import { Bot, Context } from "grammy";
 import { config } from "./config.js";
 import { MuninClient } from "./munin-client.js";
 import { ResultPoller } from "./result-poller.js";
-import { gatherContext, triage } from "./concierge.js";
+import { gatherContext, triage, summarizeResult } from "./concierge.js";
 import { submitTask } from "./task-writer.js";
-import { formatResult } from "./telegram-util.js";
+import { formatResultWithSummary } from "./telegram-util.js";
 import { MessageAggregator } from "./message-aggregator.js";
 import { MessageTracker } from "./message-tracker.js";
 import type { TrackedMessage } from "./message-tracker.js";
@@ -247,7 +247,7 @@ Or just send a message and the concierge will triage it.`
       messageTracker.track(ackRaw.message_id, { type: "ack", taskId });
       poller.startPolling(taskId, async (result) => {
         try {
-          const resultText = formatResult(result, taskId);
+          const resultText = await formatResultWithSummary(result, taskId, summarizeResult);
           const sent = await ctx.reply(resultText);
           messageTracker.track(sent.message_id, {
             type: "result",
@@ -297,7 +297,7 @@ Or just send a message and the concierge will triage it.`
       messageTracker.track(ackRepo.message_id, { type: "ack", taskId });
       poller.startPolling(taskId, async (result) => {
         try {
-          const resultText = formatResult(result, taskId);
+          const resultText = await formatResultWithSummary(result, taskId, summarizeResult);
           const sent = await ctx.reply(resultText);
           messageTracker.track(sent.message_id, {
             type: "result",
@@ -357,7 +357,7 @@ Or just send a message and the concierge will triage it.`
               messageTracker.track(ackSent.message_id, { type: "ack", taskId });
               poller.startPolling(taskId, async (pollResult) => {
                 try {
-                  const resultText = formatResult(pollResult, taskId);
+                  const resultText = await formatResultWithSummary(pollResult, taskId, summarizeResult);
                   const sent = await ctx.reply(resultText);
                   messageTracker.track(sent.message_id, {
                     type: "result",
@@ -451,7 +451,7 @@ Or just send a message and the concierge will triage it.`
           messageTracker.track(sent.message_id, { type: "ack", taskId });
           poller.startPolling(taskId, async (pollResult) => {
             try {
-              const sent = await ctx.reply(formatResult(pollResult, taskId));
+              const sent = await ctx.reply(await formatResultWithSummary(pollResult, taskId, summarizeResult));
               messageTracker.track(sent.message_id, {
                 type: "result",
                 taskId,
