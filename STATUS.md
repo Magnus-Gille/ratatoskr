@@ -1,9 +1,32 @@
 # Ratatoskr Status
 
-**Last session:** 2026-04-04
+**Last session:** 2026-04-23
 **Branch:** main
 
-## Completed This Session
+## Completed This Session (2026-04-23)
+
+### Feature: HMAC-SHA256 task submission signing
+
+Wire Ratatoskr into Hugin's v1 signing scheme (see
+`hugin/docs/security/task-signing.md`).
+
+- New `src/task-signing.ts` — mirrors hugin's canonicalization
+  (`buildCanonicalPayload`, `signTask`, `canonicalizePrompt`).
+- `src/task-writer.ts` embeds `**Signature:** v1:<keyId>:<hex>` in the
+  task body when `RATATOSKR_SIGNING_SECRET` is set; omits it when unset
+  (backwards-compat default during rollout).
+- Config adds `RATATOSKR_SIGNING_SECRET` and
+  `RATATOSKR_SIGNING_KEY_ID` (default `ratatoskr`).
+- Tests: 9 new signing tests including a cross-language drift guard
+  that spawns `hugin/scripts/sign-task.mjs` and asserts byte-equal
+  output. All 93 tests passing, build green.
+
+Rollout: unsigned by default on Pi until the env var is set. Hugin
+remains on `HUGIN_SIGNING_POLICY=off` — flipping to `warn` needs the
+secret deployed on both sides.
+
+## Completed 2026-04-04
+
 - `1f3d3ec` feat: soul definition + result formatting (Hugin task)
   - Created `src/soul.ts` with `RATATOSKR_SOUL` constant
   - `extractResultBody()`, `formatResult()`, `shortId()`, `STATUS_MESSAGES` in telegram-util.ts
@@ -35,6 +58,10 @@
 - Nothing — all changes deployed
 
 ## Next Steps
+- **Deploy signing secret** to Pi env: set `RATATOSKR_SIGNING_SECRET`
+  (64-char hex) and the matching `HUGIN_SUBMITTER_KEYS` entry
+  `{"ratatoskr": "<same-hex>"}` on Hugin. Flip `HUGIN_SIGNING_POLICY=warn`
+  to watch for stragglers.
 - Test the full pipeline end-to-end: submit a task via Telegram, verify result comes back summarized in Ratatoskr's voice
 - Consider "task picked up" intermediate notifications (running status)
 - Consider voice message support
