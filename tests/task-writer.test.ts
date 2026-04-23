@@ -3,11 +3,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("../src/config.js", () => ({
   config: {
     instanceId: "test-instance",
+    reposBasePath: "/home/magnus/repos",
+    signingSecret: "",
+    signingKeyId: "ratatoskr",
   },
 }));
 
 import { submitTask } from "../src/task-writer.js";
 import type { MuninClient } from "../src/munin-client.js";
+import { config } from "../src/config.js";
 
 function mockMunin(): MuninClient & { write: ReturnType<typeof vi.fn> } {
   return {
@@ -62,6 +66,46 @@ describe("task-writer", () => {
     expect(content).toContain("### Prompt");
     expect(content).toContain("Fix the login bug");
     expect(tags).toEqual(["pending", "runtime:claude", "instance:test-instance"]);
+  });
+
+  it("should omit **Signature:** line when no signing secret is configured", async () => {
+    const munin = mockMunin();
+    await submitTask(
+      {
+        title: "Unsigned",
+        prompt: "noop",
+        context: "scratch",
+        timeout: 300,
+        chatId: "1",
+      },
+      munin,
+    );
+    const content = munin.write.mock.calls[0][2] as string;
+    expect(content).not.toContain("**Signature:**");
+  });
+
+  it("should embed a **Signature:** line when signing secret is configured", async () => {
+    const prev = { secret: config.signingSecret, keyId: config.signingKeyId };
+    config.signingSecret = "a".repeat(64);
+    config.signingKeyId = "ratatoskr";
+    try {
+      const munin = mockMunin();
+      await submitTask(
+        {
+          title: "Signed",
+          prompt: "noop",
+          context: "scratch",
+          timeout: 300,
+          chatId: "1",
+        },
+        munin,
+      );
+      const content = munin.write.mock.calls[0][2] as string;
+      expect(content).toMatch(/\*\*Signature:\*\* v1:ratatoskr:[0-9a-f]{64}/);
+    } finally {
+      config.signingSecret = prev.secret;
+      config.signingKeyId = prev.keyId;
+    }
   });
 
   it("should slugify title for task ID", async () => {
