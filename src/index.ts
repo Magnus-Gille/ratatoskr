@@ -4,6 +4,7 @@ import { MuninClient } from "./munin-client.js";
 import { ResultPoller } from "./result-poller.js";
 import { createBot } from "./bot.js";
 import { recoverActivePolls } from "./recovery.js";
+import { ConsolidationHealthPoller } from "./consolidation-health-poller.js";
 
 validateConfig();
 
@@ -14,6 +15,11 @@ const munin = new MuninClient({
 });
 const poller = new ResultPoller(munin);
 const bot = createBot(munin, poller);
+const consolidationPoller = new ConsolidationHealthPoller(
+  munin,
+  bot.api,
+  config.consolidationPollMs
+);
 
 let botConnected = false;
 
@@ -67,6 +73,7 @@ bot
         console.error("Failed to recover active polls:", err);
         // Non-fatal — bot still works for new messages
       }
+      consolidationPoller.start();
     },
   })
   .catch((err) => {
@@ -79,6 +86,7 @@ function shutdown(signal: string) {
   bot.stop();
   botConnected = false;
   poller.stopAll();
+  consolidationPoller.stop();
   server.close(() => {
     console.log("Ratatoskr stopped.");
     process.exit(0);
