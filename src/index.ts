@@ -1,5 +1,6 @@
 import express from "express";
 import { config, validateConfig } from "./config.js";
+import { requireSendApiKey } from "./auth.js";
 import { MuninClient } from "./munin-client.js";
 import { ResultPoller } from "./result-poller.js";
 import { createBot } from "./bot.js";
@@ -34,7 +35,7 @@ app.get("/health", (_req, res) => {
   });
 });
 
-app.post("/api/send", async (req, res) => {
+app.post("/api/send", requireSendApiKey(config.sendApiKey, config.host), async (req, res) => {
   const { chat_id, text } = req.body ?? {};
   if (typeof chat_id !== "number" || typeof text !== "string" || !text) {
     res.status(400).json({ error: "chat_id (number) and text (string) are required" });
