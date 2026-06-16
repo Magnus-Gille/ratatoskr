@@ -76,4 +76,54 @@ describe("requireSendApiKey", () => {
     expect(res.status).toHaveBeenCalledWith(401);
     expect(res.json).toHaveBeenCalledWith({ error: "Unauthorized" });
   });
+
+  // Malformed Authorization schemes — all should → 401 when a key is configured
+  it("(g) 'Bearer' alone (no token) → 401", () => {
+    const mw = requireSendApiKey("mysecret", "0.0.0.0");
+    const next = vi.fn();
+    const res = makeRes();
+    mw(makeReq("Bearer"), res, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({ error: "Unauthorized" });
+  });
+
+  it("(h) lowercase scheme 'bearer mysecret' → 401", () => {
+    const mw = requireSendApiKey("mysecret", "0.0.0.0");
+    const next = vi.fn();
+    const res = makeRes();
+    mw(makeReq("bearer mysecret"), res, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({ error: "Unauthorized" });
+  });
+
+  it("(i) tab before token 'Bearer \\tsecret' → 401", () => {
+    const mw = requireSendApiKey("mysecret", "0.0.0.0");
+    const next = vi.fn();
+    const res = makeRes();
+    mw(makeReq("Bearer \tmysecret"), res, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({ error: "Unauthorized" });
+  });
+
+  // Loopback variants — no key configured → next() called
+  it("(j) no key + host '::1' → next called", () => {
+    const mw = requireSendApiKey("", "::1");
+    const next = vi.fn();
+    const res = makeRes();
+    mw(makeReq(), res, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it("(k) no key + host 'localhost' → next called", () => {
+    const mw = requireSendApiKey("", "localhost");
+    const next = vi.fn();
+    const res = makeRes();
+    mw(makeReq(), res, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(res.status).not.toHaveBeenCalled();
+  });
 });
