@@ -14,6 +14,7 @@ export const config = {
   maxPollDurationMs: parseInt(process.env.MAX_POLL_DURATION_MS || "7200000"),
   instanceId: process.env.RATATOSKR_INSTANCE_ID || "default",
   reposBasePath: process.env.REPOS_BASE_PATH || "/home/magnus/repos",
+  sendApiKey: process.env.RATATOSKR_SEND_API_KEY || "",
   signingSecret: process.env.RATATOSKR_SIGNING_SECRET || "",
   signingKeyId: process.env.RATATOSKR_SIGNING_KEY_ID || "ratatoskr",
   consolidationPollMs: parseInt(

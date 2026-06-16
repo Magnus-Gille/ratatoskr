@@ -1,5 +1,6 @@
 import express from "express";
 import { config, validateConfig } from "./config.js";
+import { requireSendApiKey } from "./auth.js";
 import { MuninClient } from "./munin-client.js";
 import { ResultPoller } from "./result-poller.js";
 import { createBot } from "./bot.js";
@@ -23,8 +24,6 @@ const consolidationPoller = new ConsolidationHealthPoller(
 
 let botConnected = false;
 
-app.use(express.json());
-
 app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
@@ -34,7 +33,9 @@ app.get("/health", (_req, res) => {
   });
 });
 
-app.post("/api/send", async (req, res) => {
+// express.json() is scoped to this route only — after auth — so unauthenticated
+// requests never touch the JSON parser. /health is GET and needs no body parsing.
+app.post("/api/send", requireSendApiKey(config.sendApiKey, config.host), express.json(), async (req, res) => {
   const { chat_id, text } = req.body ?? {};
   if (typeof chat_id !== "number" || typeof text !== "string" || !text) {
     res.status(400).json({ error: "chat_id (number) and text (string) are required" });
