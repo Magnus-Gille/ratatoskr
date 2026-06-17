@@ -138,12 +138,16 @@ export async function triage(
   let systemContent = `${SYSTEM_PROMPT}\n\n## Current Munin Context\n${muninContext}`;
 
   if (replyContext) {
-    const ref = replyContext.taskId
-      ? `the ${replyContext.type} for task "${replyContext.taskId}"`
-      : `a previous ${replyContext.type} message`;
-    systemContent += `\n\n## Reply Context\nThe user is replying to ${ref}.`;
-    if (replyContext.snippet) {
-      systemContent += ` That message said: "${replyContext.snippet}"`;
+    if (replyContext.replyToText) {
+      systemContent += `\n\n## Reply Context\nThe user is replying to an earlier message. That message said:\n"""${replyContext.replyToText}"""`;
+    } else {
+      const ref = replyContext.taskId
+        ? `the ${replyContext.type} for task "${replyContext.taskId}"`
+        : `a previous ${replyContext.type} message`;
+      systemContent += `\n\n## Reply Context\nThe user is replying to ${ref}.`;
+      if (replyContext.snippet) {
+        systemContent += ` That message said: "${replyContext.snippet}"`;
+      }
     }
   }
 

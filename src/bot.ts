@@ -10,6 +10,34 @@ import { MessageTracker } from "./message-tracker.js";
 import type { TrackedMessage } from "./message-tracker.js";
 import { downloadPhoto } from "./telegram-file.js";
 
+/**
+ * Build a reply context object from Telegram's reply_to_message and the
+ * in-memory tracker result (either of which may be absent).
+ *
+ * Telegram delivers the text of the replied-to message for free in
+ * `reply_to_message.text` / `reply_to_message.caption`, so we don't need the
+ * tracker for untracked alerts. This function merges both sources with
+ * Telegram's text taking precedence.
+ *
+ * Returns null when there is no usable reply information.
+ */
+export function buildReplyContext(
+  repliedTo: { message_id: number; text?: string; caption?: string } | undefined | null,
+  tracked: TrackedMessage | null
+): TrackedMessage | null {
+  const repliedText = repliedTo?.text ?? repliedTo?.caption;
+  if (!repliedTo || (!repliedText && !tracked)) return null;
+
+  const replyToText = repliedText?.slice(0, 1000);
+
+  if (tracked) {
+    return { ...tracked, replyToText };
+  }
+
+  // Untracked message (e.g. proactive alert) — synthesize a minimal object
+  return { type: "status", timestamp: Date.now(), replyToText };
+}
+
 interface ConversationEntry {
   role: "user" | "assistant";
   content: string;
@@ -420,9 +448,11 @@ Or just send a message and the concierge will triage it.`
       const history = await getConversation(chatId);
       const muninContext = await gatherContext(munin);
 
-      // Check if this is a reply to a previous message
-      const replyTo = ctx.message.reply_to_message?.message_id;
-      const replyCtx = replyTo ? messageTracker.lookup(replyTo) : null;
+      // Check if this is a reply to a previous message.
+      // Merge Telegram's reply text with the tracker so untracked alerts work.
+      const repliedToPhoto = ctx.message.reply_to_message;
+      const trackedPhoto = repliedToPhoto ? messageTracker.lookup(repliedToPhoto.message_id) : null;
+      const replyCtx = buildReplyContext(repliedToPhoto, trackedPhoto);
 
       const result = await triage(
         caption,
@@ -497,9 +527,12 @@ Or just send a message and the concierge will triage it.`
     // Always keep the freshest ctx so replies go to the right update.
     latestCtx.set(chatId, ctx);
 
-    // Check if this message is a reply to one of our tracked messages.
-    const replyTo = ctx.message.reply_to_message?.message_id;
-    const replyContext = replyTo ? messageTracker.lookup(replyTo) : null;
+    // Check if this message is a reply to one of our messages.
+    // We merge Telegram's reply_to_message text (always present when replying)
+    // with the tracker result so that untracked proactive alerts are handled.
+    const repliedTo = ctx.message.reply_to_message;
+    const tracked = repliedTo ? messageTracker.lookup(repliedTo.message_id) : null;
+    const replyContext = buildReplyContext(repliedTo, tracked);
     if (replyContext) {
       pendingReplyContext.set(chatId, replyContext);
     }
