@@ -145,6 +145,59 @@ describe("concierge", () => {
       expect(callArgs.system).toContain("That didn't work.");
     });
 
+    it("should prefer replyToText over snippet when replyContext has replyToText set (tracker-independent)", async () => {
+      // This is the proactive alert case: the alert was never registered in the
+      // tracker, so replyContext arrives with replyToText (from Telegram's
+      // reply_to_message.text) but no taskId/snippet.
+      const alertText =
+        "🔴 Munin consolidation worker TRIPPED — last heartbeat 47 min ago. Check huginmunin.";
+
+      mockCreate.mockResolvedValue({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ action: "answer", reply: "Restarting the worker now." }),
+          },
+        ],
+      });
+
+      await triage("thats fine, restart it", [], "No context", {
+        type: "status",
+        replyToText: alertText,
+        timestamp: Date.now(),
+      });
+
+      const callArgs = mockCreate.mock.calls[0][0];
+      expect(callArgs.system).toContain("Reply Context");
+      // Must contain the full alert text verbatim
+      expect(callArgs.system).toContain(alertText);
+      // Must NOT fall back to snippet-style reference ("a previous status message")
+      // when replyToText is present
+      expect(callArgs.system).not.toContain("a previous status message");
+    });
+
+    it("should fall back to snippet-based context when replyToText is absent", async () => {
+      mockCreate.mockResolvedValue({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ action: "answer", reply: "ok" }),
+          },
+        ],
+      });
+
+      await triage("run this again", [], "No context", {
+        type: "result",
+        taskId: "some-task",
+        snippet: "The build succeeded.",
+        timestamp: Date.now(),
+      });
+
+      const callArgs = mockCreate.mock.calls[0][0];
+      expect(callArgs.system).toContain("Reply Context");
+      expect(callArgs.system).toContain("The build succeeded.");
+    });
+
     it("should send multimodal content when images are provided", async () => {
       mockCreate.mockResolvedValue({
         content: [

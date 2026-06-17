@@ -2,6 +2,7 @@ export interface TrackedMessage {
   type: "result" | "status" | "clarify" | "answer" | "ack";
   taskId?: string;
   snippet?: string; // first ~200 chars of the message content
+  replyToText?: string; // full text of the replied-to message (up to 1000 chars)
   timestamp: number;
 }
 
