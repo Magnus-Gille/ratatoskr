@@ -22,6 +22,11 @@ export const config = {
   ),
 };
 
+// Mirrors LOOPBACK_HOSTS in auth.ts — kept local so config validation has no
+// dependency on the auth layer. Wildcard binds expose every interface.
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
+const WILDCARD_HOSTS = new Set(["0.0.0.0", "::"]);
+
 export function validateConfig(): void {
   const required: { key: keyof typeof config; label: string }[] = [
     { key: "telegramBotToken", label: "TELEGRAM_BOT_TOKEN" },
@@ -42,5 +47,24 @@ export function validateConfig(): void {
       "TELEGRAM_ALLOWED_USERS must contain at least one user ID"
     );
     process.exit(1);
+  }
+
+  // Remote-send posture (see docs/remote-send.md). Non-fatal — the bot must keep
+  // serving Telegram even when /api/send is fail-closed, and a misconfig here
+  // should be loud at boot rather than surface only as a runtime 401.
+  if (!LOOPBACK_HOSTS.has(config.host)) {
+    if (!config.sendApiKey) {
+      console.warn(
+        `⚠️  HOST=${config.host} is non-loopback but RATATOSKR_SEND_API_KEY is unset — ` +
+          `POST /api/send is DISABLED (fail-closed). Set the key to enable authenticated remote send.`
+      );
+    }
+    if (WILDCARD_HOSTS.has(config.host)) {
+      console.warn(
+        `⚠️  HOST=${config.host} is a wildcard bind — /api/send is exposed on ALL interfaces ` +
+          `incl. LAN/Wi-Fi, where the Bearer token is NOT transport-encrypted. Bind to this ` +
+          `Pi's Tailscale IP instead (see docs/remote-send.md).`
+      );
+    }
   }
 }
