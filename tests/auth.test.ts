@@ -126,4 +126,29 @@ describe("requireSendApiKey", () => {
     expect(next).toHaveBeenCalledOnce();
     expect(res.status).not.toHaveBeenCalled();
   });
+
+  // Deployment shape: HOST bound to the Pi's Tailscale IP (CGNAT 100.64.0.0/10).
+  // A Tailscale IP is non-loopback, so the key is mandatory (fail-closed) and,
+  // once configured, the Bearer token is enforced on that bind.
+  it("(l) no key + Tailscale IP → 401 (endpoint disabled, fail-closed)", () => {
+    const mw = requireSendApiKey("", "100.97.117.37");
+    const next = vi.fn();
+    const res = makeRes();
+    mw(makeReq("Bearer anything"), res, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({
+      error:
+        "Send API key not configured; endpoint disabled on non-loopback bind",
+    });
+  });
+
+  it("(m) valid Bearer + key on Tailscale IP bind → next called", () => {
+    const mw = requireSendApiKey("s3nd-k3y", "100.97.117.37");
+    const next = vi.fn();
+    const res = makeRes();
+    mw(makeReq("Bearer s3nd-k3y"), res, next);
+    expect(next).toHaveBeenCalledOnce();
+    expect(res.status).not.toHaveBeenCalled();
+  });
 });

@@ -73,12 +73,16 @@ ANTHROPIC_API_KEY=<for concierge Haiku calls>
 MUNIN_API_KEY=<same key Munin/Hugin use>
 ```
 
+To let trusted tailnet hosts trigger Telegram pings without SSH/on-box access,
+see **`docs/remote-send.md`** (bind `HOST` to the Tailscale IP + set
+`RATATOSKR_SEND_API_KEY`).
+
 ## Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3034` | Health endpoint port |
-| `HOST` | `127.0.0.1` | Bind address |
+| `HOST` | `127.0.0.1` | Bind address. Set to the Pi's Tailscale IP to enable authenticated remote send (requires `RATATOSKR_SEND_API_KEY`). See `docs/remote-send.md`. |
 | `TELEGRAM_BOT_TOKEN` | — | Bot token from @BotFather (required) |
 | `TELEGRAM_ALLOWED_USERS` | — | Comma-separated Telegram user IDs (required) |
 | `ANTHROPIC_API_KEY` | — | API key for concierge Haiku calls (required) |
@@ -89,6 +93,10 @@ MUNIN_API_KEY=<same key Munin/Hugin use>
 | `MAX_POLL_DURATION_MS` | `7200000` | Stop polling after this (2x default task timeout) |
 | `RATATOSKR_INSTANCE_ID` | `default` | Instance identifier for multi-instance isolation |
 | `REPOS_BASE_PATH` | `/home/magnus/repos` | Base path for resolving `repo:<name>` context to filesystem paths |
+| `RATATOSKR_SEND_API_KEY` | — | Bearer token for `POST /api/send`. Mandatory when `HOST` is non-loopback (the endpoint is disabled otherwise); when set, enforced on **all** binds incl. loopback. See `docs/remote-send.md`. |
+| `RATATOSKR_SIGNING_SECRET` | — | HMAC-SHA256 secret for Hugin task submission signing (PR #5) |
+| `RATATOSKR_SIGNING_KEY_ID` | `ratatoskr` | Key ID advertised alongside signed task submissions |
+| `RATATOSKR_CONSOLIDATION_POLL_MS` | `120000` | Interval for polling Munin consolidation-worker health |
 
 ## Concierge design
 
