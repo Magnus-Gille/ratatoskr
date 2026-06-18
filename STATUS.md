@@ -1,9 +1,41 @@
 # Ratatoskr Status
 
-**Last session:** 2026-06-17
+**Last session:** 2026-06-18
 **Branch:** main
 
-## Completed This Session (2026-06-17)
+## Completed This Session (2026-06-18)
+
+### Authenticated remote send over Tailscale (ratatoskr #10 + grimnir #32 — merged + deployed + verified live)
+
+Closed a recurring gap: agents on the laptop could not fire a Telegram ping
+without SSH to the Pi (YubiKey-gated). Root insight — the auth model already
+shipped in PR #7, so `src/auth.ts` is **unchanged**; enablement is config-only.
+
+- **ratatoskr #10** (config + docs + hardening): `ratatoskr.service` gains
+  `After=tailscaled.service`; `validateConfig()` warns at boot when `HOST` is
+  non-loopback with no key (fail-closed) or a wildcard bind (cleartext token on
+  the LAN); new `docs/remote-send.md` runbook; auth cases (l)/(m) + 3 config
+  posture tests.
+- **grimnir #32**: `notify_telegram` reaches `/api/send` over the tailnet with a
+  Bearer key via `curl --config` (key never in argv); reads creds from the Pi
+  `.env` or a fleet file `~/.config/grimnir/notify.env`. Also fixed a **live
+  `set -e` regression** that could abort `maintenance-report.sh`.
+- Reviewed by a multi-agent pass (build/tests, shell, docs/systemd, adversarial
+  security, completeness critic) + a re-verify incl. a real `set -e`
+  reproduction. 138 tests green, `tsc` clean, shellcheck clean.
+- **Deployed to the Pi (Magnus present w/ YubiKey):** `HOST=100.97.117.37`
+  (Tailscale IP) + `RATATOSKR_SEND_API_KEY` set; bot came up `active` (the bind
+  did not crash it). Verified from the Pi **and** the laptop over the tailnet:
+  authed `/api/send` → 200 (Telegram delivered), no-key → 401. Laptop
+  provisioned (`~/.config/grimnir/notify.env`, mode 600).
+
+Flagged tradeoff (opt-in fix in the runbook): binding to the Tailscale IP
+couples the bot to tailnet availability (`app.listen` has no error handler), so
+a tailnet outage crash-loops the bot until it recovers. Deferred follow-up:
+`/api/send` integration tests (chat_id→400, allowed-users→403) — needs
+extracting the route handler from `index.ts`.
+
+## Completed 2026-06-17
 
 ### Fix: reply-awareness for proactive alerts (PR #8 — merged + deployed + verified)
 
