@@ -6,6 +6,7 @@ import { ResultPoller } from "./result-poller.js";
 import { createBot } from "./bot.js";
 import { recoverActivePolls } from "./recovery.js";
 import { ConsolidationHealthPoller } from "./consolidation-health-poller.js";
+import { attachBindResilience } from "./listen.js";
 
 validateConfig();
 
@@ -59,6 +60,11 @@ const server = app.listen(config.port, config.host, () => {
     `Ratatoskr health endpoint on http://${config.host}:${config.port}/health`
   );
 });
+// When HOST is the Pi's Tailscale IP, the bind can fail with EADDRNOTAVAIL if
+// tailscaled isn't up yet. Without this handler the unhandled 'error' event
+// would crash-loop the whole process (Telegram bot included). See
+// docs/remote-send.md → "Optional: make the bind resilient".
+attachBindResilience(server, config.host, config.port);
 
 bot
   .start({
