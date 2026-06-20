@@ -36,6 +36,9 @@ Part of the Grimnir system: **Munin** (memory), **Hugin** (task dispatcher), **R
 - `src/telegram-file.ts` — Download photos from Telegram's file API
 - `src/message-tracker.ts` — In-memory tracker mapping outbound Telegram message IDs to context (for reply awareness)
 - `src/message-aggregator.ts` — Debounce rapid Telegram message fragments into single logical messages
+- `src/auth.ts` — Bearer-token middleware for `POST /api/send` (timing-safe; fail-closed when bound non-loopback without a key)
+- `src/consolidation-health-poller.ts` — Poll Munin consolidation-worker health; Telegram alert on failure/recovery
+- `src/listen.ts` — Resilient HTTP listener bind: retry `EADDRNOTAVAIL` (Tailscale IP not yet assigned) instead of crash-looping the process
 - `src/config.ts` — Environment configuration
 
 ## How to build

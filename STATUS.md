@@ -1,9 +1,46 @@
 # Ratatoskr Status
 
-**Last session:** 2026-04-23
+**Last session:** 2026-06-20
 **Branch:** main
 
-## Completed This Session (2026-04-23)
+## Completed This Session (2026-06-20)
+
+### Fix: resilient listener bind (PR #11, deployed)
+
+The `/api/send` listener binds the Pi's Tailscale IP (`HOST=100.97.117.37`).
+`app.listen` had no `'error'` handler, so an `EADDRNOTAVAIL` bind failure
+(tailscaled not up at boot, or a runtime tailnet blip) crash-looped the
+**whole process — the Telegram bot included**, even though the bot needs no
+tailnet. With Heimdall now routing its alerts through `POST /api/send`, the
+listener's resilience matters beyond remote-send.
+
+- New `src/listen.ts` — pure `decideBindRetry()` + thin `attachBindResilience()`
+  wrapper (injectable schedule/exit/logger). Retries `EADDRNOTAVAIL` only,
+  bounded at 60×/~5min, then exits so systemd `Restart=always` takes over.
+- `src/index.ts` wires it in right after `app.listen`.
+- `tests/listen.test.ts` — 10 tests (TDD red→green). Suite: **148 passing**, tsc clean.
+- Converted the previously-"optional" bind-resilience patch in
+  `docs/remote-send.md` into the shipped default; updated `ratatoskr.service` comment.
+- Codex (gpt-5.5, xhigh) cross-model review: 0 critical, 0 medium, 1 low
+  (doc drift — fixed in the same PR).
+- Commits: `020b46a` (fix), squashed from `d4d1c72` + `c95e827`.
+- **Deployed** to huginmunin via `deploy.sh` and verified live: `/health` 200 on
+  `100.97.117.37:3034`, `bot_connected:true`, clean first-try bind, no retries.
+
+## Completed since the last STATUS update (2026-04-23 → 2026-06-20)
+
+All merged to main and deployed to the Pi:
+- **Remote-send over Tailscale** (PR #10 + grimnir #32) — authenticated
+  `POST /api/send` over the tailnet; laptop pings Telegram without SSH/YubiKey.
+  Verified live 2026-06-18.
+- **POST /api/send bearer auth** (PR #7) — timing-safe, fail-closed on
+  non-loopback bind without a key (`src/auth.ts`).
+- **Reply-awareness for untracked alerts** (PR #8) — carries replied-to text
+  into the concierge.
+- **Munin consolidation-worker health alerting** (PR #6) —
+  `src/consolidation-health-poller.ts`, Telegram alert on failure/recovery.
+
+## Completed 2026-04-23
 
 ### Feature: HMAC-SHA256 task submission signing
 
@@ -58,11 +95,14 @@ secret deployed on both sides.
 - Nothing — all changes deployed
 
 ## Next Steps
+- **`/api/send` integration tests** — `chat_id`→400, allowed-users→403,
+  json-parsed-after-auth. Requires extracting the inline route handler from
+  `index.ts` into an injectable function first (the testable seam).
 - **Deploy signing secret** to Pi env: set `RATATOSKR_SIGNING_SECRET`
   (64-char hex) and the matching `HUGIN_SUBMITTER_KEYS` entry
   `{"ratatoskr": "<same-hex>"}` on Hugin. Flip `HUGIN_SIGNING_POLICY=warn`
-  to watch for stragglers.
-- Test the full pipeline end-to-end: submit a task via Telegram, verify result comes back summarized in Ratatoskr's voice
-- Consider "task picked up" intermediate notifications (running status)
-- Consider voice message support
-- Consider document/file handling
+  to watch for stragglers. (PR #5 code is shipped but dormant until provisioned.)
+- "Task picked up" intermediate notification (#2) — ack on first in-progress transition
+- Concierge per-user rate limiting / debounce (#3)
+- Non-text messages (#1): voice transcription + document routing (photos already work)
+- Prior backlog: grimnir #31 (restart-after-dep-upgrade); pendingReplyContext per-message keying
