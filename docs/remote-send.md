@@ -26,11 +26,12 @@ to the tailnet IP keeps the token on the encrypted tailnet only.
 
 > **Heads-up — availability coupling.** Binding the process to the Tailscale IP
 > means the listener can only start once `tailscaled` has assigned the address.
-> `After=tailscaled.service` + `Restart=always` handle the boot race (an early
-> start exits with `EADDRNOTAVAIL` and systemd retries). But if Tailscale is down
-> at *runtime*, `app.listen` has no error handler, so the whole process — Telegram
-> bot included — will crash-loop even though the bot itself needs no tailnet.
-> See **Optional: make the bind resilient** below to decouple them.
+> The listener handles this in-process: `src/listen.ts` retries an
+> `EADDRNOTAVAIL` bind (≈60×, 5s apart) instead of letting the unhandled `error`
+> event crash-loop the whole process — so a boot race or a runtime tailnet blip
+> no longer takes the Telegram bot (which needs no tailnet) down with it.
+> `After=tailscaled.service` still orders the common case, and `Restart=always`
+> is the backstop once the retry cap is exhausted. See **Bind resilience** below.
 
 ---
 
@@ -119,37 +120,30 @@ notify_telegram "ping from laptop over tailnet 🐿️"
 
 ---
 
-## Optional: make the bind resilient (decouple bot from tailnet)
+## Bind resilience (decouples the bot from the tailnet)
 
-If you'd rather the Telegram bot survive a tailnet outage instead of crash-looping
-when the Tailscale IP is unavailable, add an `error` handler to the listener in
-`src/index.ts` (retry the bind instead of letting the unhandled `error` event kill
-the process):
+So a tailnet outage can't crash-loop the whole process when the Tailscale IP is
+unavailable, the listener carries a bind-retry `error` handler —
+`attachBindResilience()` in `src/listen.ts`, wired into `src/index.ts` right after
+`app.listen`. Instead of letting the unhandled `error` event kill the process, it
+re-binds on `EADDRNOTAVAIL`:
 
 ```ts
 const server = app.listen(config.port, config.host, () => { /* ...existing log... */ });
-let bindRetries = 0;
-server.on("error", (err: NodeJS.ErrnoException) => {
-  if (err.code === "EADDRNOTAVAIL" && bindRetries < 60) {
-    bindRetries++;
-    console.warn(`Bind ${config.host}:${config.port} not yet available — retry ${bindRetries}/60 in 5s`);
-    setTimeout(() => server.listen(config.port, config.host), 5000);
-    return;
-  }
-  console.error("HTTP server error:", err);
-  process.exit(1);
-});
+attachBindResilience(server, config.host, config.port);
 ```
 
-The `bindRetries < 60` cap (≈5 min) bounds the retry so a permanently-down
-tailnet eventually exits to `Restart=always` rather than spinning forever; the
-re-`listen` is called directly (the failed socket never bound, so there's nothing
-to `close()` first).
+It retries the bind on `EADDRNOTAVAIL` up to `MAX_BIND_RETRIES` (60, ≈5 min at
+`BIND_RETRY_DELAY_MS` = 5s), then exits so `Restart=always` takes over rather than
+spinning forever; the re-`listen` is called directly (the failed socket never
+bound, so there's nothing to `close()` first). Only `EADDRNOTAVAIL` is retried —
+any other bind error (e.g. `EADDRINUSE` from a duplicate process) is fatal
+immediately, so a real misconfiguration surfaces instead of being masked. The
+decision logic lives in the pure `decideBindRetry()` and is covered by
+`tests/listen.test.ts`.
 
-Not applied by default — `Restart=always` already recovers across the boot race,
-and on `huginmunin` the tailnet is effectively always up. The tradeoff: while the
-bind is unavailable the **whole bot is down**, so apply this if you want Telegram
-polling to survive a tailnet blip.
+While the bind is unavailable the health + `/api/send` endpoint is down, but the
+Telegram bot keeps polling — the point of decoupling them.
 
 ---
 

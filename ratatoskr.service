@@ -2,9 +2,10 @@
 Description=Ratatoskr Telegram Router
 # tailscaled ordering matters when HOST is bound to the Pi's Tailscale IP for
 # authenticated remote send (docs/remote-send.md): the tailnet address must be
-# assigned before we listen on it. Ordering is best-effort — the real safety net
-# for the bind race is Restart=always below (a too-early start exits with
-# EADDRNOTAVAIL and systemd retries until the address is up).
+# assigned before we listen on it. Ordering is best-effort — the bind race is
+# handled in-process first (src/listen.ts retries EADDRNOTAVAIL ~60x/5min so a
+# tailnet blip doesn't take the bot down), with Restart=always below as the
+# backstop once that retry cap is exhausted.
 After=network-online.target tailscaled.service munin-memory.service
 Wants=network-online.target
 
