@@ -47,9 +47,11 @@ auth-before-json-parse ordering were untestable. Extracted into a seam:
 - Adversarial 3-lens review (equivalence/security/test-quality): equivalence &
   security clean; test-quality found a **false-green** malformed-JSON assertion
   (fixed with a discriminator) + missing cases (added).
-- Commits `19f8c2e` (feat) + `1e23ec1` (STATUS) on branch
-  `feat/api-send-integration-tests`; pushed. **PR #13 open**, awaiting review +
-  merge (no CI configured for this repo; verified locally green).
+- Cross-model Codex review (gpt-5.5, xhigh): clean, zero findings.
+- **Merged** to main via PR #13 (squash `d841f02`) and **deployed** to
+  huginmunin — service active, `/health` 200 with `bot_connected:true`
+  (rsync excludes `tests/`; verified live 2026-06-20). Test-only + pure
+  refactor, so no runtime behavior change.
 
 ## Completed since the last STATUS update (2026-04-23 → 2026-06-20)
 
@@ -116,9 +118,7 @@ secret deployed on both sides.
 - Deployed on Pi (huginmunin), systemd service, Heimdall monitoring
 
 ## In Progress
-- **`/api/send` integration tests** — **PR #13 open**
-  (`feat/api-send-integration-tests`), green + reviewed, awaiting human review +
-  merge. See "Completed This Session" above.
+- Nothing — all changes merged and deployed.
 
 ## Next Steps
 - **Deploy signing secret** to Pi env: set `RATATOSKR_SIGNING_SECRET`
