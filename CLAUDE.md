@@ -24,7 +24,7 @@ Part of the Grimnir system: **Munin** (memory), **Hugin** (task dispatcher), **R
 
 ### Components
 
-- `src/index.ts` — Express health endpoint + bot startup + poll recovery
+- `src/index.ts` — Express app (health endpoint + registers `/api/send` route) + bot startup + poll recovery
 - `src/bot.ts` — Telegram bot setup, message/photo handlers, allowlist, conversation persistence
 - `src/concierge.ts` — Intent triage via Claude Haiku API (multimodal: text + images), result summarization
 - `src/soul.ts` — `RATATOSKR_SOUL` constant defining Ratatoskr's voice/personality for all Telegram output
@@ -37,6 +37,7 @@ Part of the Grimnir system: **Munin** (memory), **Hugin** (task dispatcher), **R
 - `src/message-tracker.ts` — In-memory tracker mapping outbound Telegram message IDs to context (for reply awareness)
 - `src/message-aggregator.ts` — Debounce rapid Telegram message fragments into single logical messages
 - `src/auth.ts` — Bearer-token middleware for `POST /api/send` (timing-safe; fail-closed when bound non-loopback without a key)
+- `src/send-handler.ts` — `POST /api/send` route: `createSendHandler` (pure, DI'd handler — validation → allowlist → send) + `registerSendRoute` (wires auth → `express.json()` → handler in order). Extracted from `index.ts` as the testable seam (tested in `tests/send-handler.test.ts`)
 - `src/consolidation-health-poller.ts` — Poll Munin consolidation-worker health; Telegram alert on failure/recovery
 - `src/listen.ts` — Resilient HTTP listener bind: retry `EADDRNOTAVAIL` (Tailscale IP not yet assigned) instead of crash-looping the process
 - `src/config.ts` — Environment configuration
