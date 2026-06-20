@@ -27,6 +27,29 @@ listener's resilience matters beyond remote-send.
 - **Deployed** to huginmunin via `deploy.sh` and verified live: `/health` 200 on
   `100.97.117.37:3034`, `bot_connected:true`, clean first-try bind, no retries.
 
+### Tests: `/api/send` integration tests + testable seam (branch, pending PR)
+
+The `POST /api/send` handler lived inline in `index.ts`, which boots the bot
+and binds a port on import — so the route's validation and the
+auth-before-json-parse ordering were untestable. Extracted into a seam:
+
+- New `src/send-handler.ts` — `createSendHandler(deps)` (pure, DI'd
+  `sendMessage`/`allowedUsers`/optional `logError`) + `registerSendRoute(app, deps)`
+  wiring `requireSendApiKey → express.json() → handler` in order.
+- `src/index.ts` — inline handler replaced with a 6-line `registerSendRoute(...)`;
+  behavior preserved (review confirmed byte-for-byte equivalent).
+- `tests/send-handler.test.ts` — 15 supertest integration + unit tests:
+  `chat_id`→400 (incl. missing/string/empty/non-string variants), allowed-users→403,
+  success→200 (asserts send args), throw→500, malformed/empty body, GET→404, and
+  two ordering tests proving auth gates the JSON parser (malformed body on an
+  unauthenticated bind → 401, not 400).
+- devDeps: `supertest`, `@types/supertest`. Suite: **148 → 163**, tsc clean.
+- Adversarial 3-lens review (equivalence/security/test-quality): equivalence &
+  security clean; test-quality found a **false-green** malformed-JSON assertion
+  (fixed with a discriminator) + missing cases (added).
+- Committed `19f8c2e` on branch `feat/api-send-integration-tests`.
+  **Not pushed / no PR yet** — awaiting go-ahead.
+
 ## Completed since the last STATUS update (2026-04-23 → 2026-06-20)
 
 All merged to main and deployed to the Pi:
@@ -92,12 +115,11 @@ secret deployed on both sides.
 - Deployed on Pi (huginmunin), systemd service, Heimdall monitoring
 
 ## In Progress
-- Nothing — all changes deployed
+- **`/api/send` integration tests** — committed `19f8c2e` on branch
+  `feat/api-send-integration-tests`, green + reviewed, **not yet pushed / no PR**
+  (awaiting go-ahead). See "Completed This Session" above.
 
 ## Next Steps
-- **`/api/send` integration tests** — `chat_id`→400, allowed-users→403,
-  json-parsed-after-auth. Requires extracting the inline route handler from
-  `index.ts` into an injectable function first (the testable seam).
 - **Deploy signing secret** to Pi env: set `RATATOSKR_SIGNING_SECRET`
   (64-char hex) and the matching `HUGIN_SUBMITTER_KEYS` entry
   `{"ratatoskr": "<same-hex>"}` on Hugin. Flip `HUGIN_SIGNING_POLICY=warn`
