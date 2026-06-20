@@ -47,8 +47,9 @@ auth-before-json-parse ordering were untestable. Extracted into a seam:
 - Adversarial 3-lens review (equivalence/security/test-quality): equivalence &
   security clean; test-quality found a **false-green** malformed-JSON assertion
   (fixed with a discriminator) + missing cases (added).
-- Committed `19f8c2e` on branch `feat/api-send-integration-tests`.
-  **Not pushed / no PR yet** — awaiting go-ahead.
+- Commits `19f8c2e` (feat) + `1e23ec1` (STATUS) on branch
+  `feat/api-send-integration-tests`; pushed. **PR #13 open**, awaiting review +
+  merge (no CI configured for this repo; verified locally green).
 
 ## Completed since the last STATUS update (2026-04-23 → 2026-06-20)
 
@@ -115,9 +116,9 @@ secret deployed on both sides.
 - Deployed on Pi (huginmunin), systemd service, Heimdall monitoring
 
 ## In Progress
-- **`/api/send` integration tests** — committed `19f8c2e` on branch
-  `feat/api-send-integration-tests`, green + reviewed, **not yet pushed / no PR**
-  (awaiting go-ahead). See "Completed This Session" above.
+- **`/api/send` integration tests** — **PR #13 open**
+  (`feat/api-send-integration-tests`), green + reviewed, awaiting human review +
+  merge. See "Completed This Session" above.
 
 ## Next Steps
 - **Deploy signing secret** to Pi env: set `RATATOSKR_SIGNING_SECRET`
