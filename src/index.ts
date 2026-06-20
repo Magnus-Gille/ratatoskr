@@ -1,6 +1,6 @@
 import express from "express";
 import { config, validateConfig } from "./config.js";
-import { requireSendApiKey } from "./auth.js";
+import { registerSendRoute } from "./send-handler.js";
 import { MuninClient } from "./munin-client.js";
 import { ResultPoller } from "./result-poller.js";
 import { createBot } from "./bot.js";
@@ -34,25 +34,11 @@ app.get("/health", (_req, res) => {
   });
 });
 
-// express.json() is scoped to this route only — after auth — so unauthenticated
-// requests never touch the JSON parser. /health is GET and needs no body parsing.
-app.post("/api/send", requireSendApiKey(config.sendApiKey, config.host), express.json(), async (req, res) => {
-  const { chat_id, text } = req.body ?? {};
-  if (typeof chat_id !== "number" || typeof text !== "string" || !text) {
-    res.status(400).json({ error: "chat_id (number) and text (string) are required" });
-    return;
-  }
-  if (!config.allowedUsers.includes(chat_id.toString())) {
-    res.status(403).json({ error: "chat_id not in allowed users list" });
-    return;
-  }
-  try {
-    await bot.api.sendMessage(chat_id, text);
-    res.json({ ok: true });
-  } catch (err) {
-    console.error("Failed to send Telegram message:", err);
-    res.status(500).json({ error: String(err) });
-  }
+registerSendRoute(app, {
+  sendMessage: (chatId, text) => bot.api.sendMessage(chatId, text),
+  allowedUsers: config.allowedUsers,
+  sendApiKey: config.sendApiKey,
+  host: config.host,
 });
 
 const server = app.listen(config.port, config.host, () => {
