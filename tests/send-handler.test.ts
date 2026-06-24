@@ -9,6 +9,7 @@ interface AppOverrides {
   allowedUsers?: string[];
   sendApiKey?: string;
   host?: string;
+  notifyHeimdall?: ReturnType<typeof vi.fn>;
 }
 
 function makeApp(overrides: AppOverrides = {}) {
@@ -22,8 +23,14 @@ function makeApp(overrides: AppOverrides = {}) {
     allowedUsers: overrides.allowedUsers ?? ["123"],
     sendApiKey: overrides.sendApiKey ?? "", // default: no key
     host: overrides.host ?? "127.0.0.1", // default: loopback → auth passes through
+    notifyHeimdall: overrides.notifyHeimdall,
   });
-  return { app, sendMessage, logError };
+  return {
+    app,
+    sendMessage,
+    logError,
+    notifyHeimdall: overrides.notifyHeimdall,
+  };
 }
 
 // Mock req/res for direct unit tests of the handler (mirrors auth.test.ts style).
@@ -195,6 +202,154 @@ describe("POST /api/send route (integration via registerSendRoute)", () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ ok: true });
     expect(sendMessage).toHaveBeenCalledWith(123, "hello");
+  });
+
+  // --- Alert envelope (issue #16) -------------------------------------------
+  it("alert-only (no text) → 200, sends rendered text from the envelope", async () => {
+    const { app, sendMessage } = makeApp();
+    const res = await request(app)
+      .post("/api/send")
+      .send({
+        chat_id: 123,
+        alert: { severity: "warn", title: "High load", body: "cpu 95%" },
+      });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+    expect(sendMessage).toHaveBeenCalledWith(123, "WARN — High load\ncpu 95%");
+  });
+
+  it("alert present but malformed (no title), no text → 400, sendMessage not called", async () => {
+    const { app, sendMessage } = makeApp();
+    const res = await request(app)
+      .post("/api/send")
+      .send({ chat_id: 123, alert: { body: "no title here" } });
+    expect(res.status).toBe(400);
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("neither text nor alert → 400 with the original message (backwards compat)", async () => {
+    const { app, sendMessage } = makeApp();
+    const res = await request(app).post("/api/send").send({ chat_id: 123 });
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({
+      error: "chat_id (number) and text (string) are required",
+    });
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("alert-only with disallowed chat_id → 403 (allowlist still enforced, no echo)", async () => {
+    const notifyHeimdall = vi.fn().mockResolvedValue(undefined);
+    const { app, sendMessage } = makeApp({
+      allowedUsers: ["123"],
+      notifyHeimdall,
+    });
+    const res = await request(app)
+      .post("/api/send")
+      .send({ chat_id: 999, alert: { title: "x" } });
+    expect(res.status).toBe(403);
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(notifyHeimdall).not.toHaveBeenCalled();
+  });
+
+  it("text + alert → sends text (not the rendered alert), and echoes the alert", async () => {
+    const notifyHeimdall = vi.fn().mockResolvedValue(undefined);
+    const { app, sendMessage } = makeApp({ notifyHeimdall });
+    const alert = { severity: "info", title: "ignored render", dedup_key: "k9" };
+    const res = await request(app)
+      .post("/api/send")
+      .send({ chat_id: 123, text: "explicit text", alert });
+    expect(res.status).toBe(200);
+    expect(sendMessage).toHaveBeenCalledWith(123, "explicit text");
+    expect(notifyHeimdall).toHaveBeenCalledOnce();
+    expect(notifyHeimdall).toHaveBeenCalledWith(alert);
+    // dedup_key passthrough preserved into the echo
+    expect(notifyHeimdall.mock.calls[0][0].dedup_key).toBe("k9");
+  });
+
+  it("alert-only → echoes the validated envelope to Heimdall AFTER the send", async () => {
+    const notifyHeimdall = vi.fn().mockResolvedValue(undefined);
+    const { app, sendMessage } = makeApp({ notifyHeimdall });
+    const alert = { severity: "critical", title: "Pi down", dedup_key: "pd" };
+    const res = await request(app)
+      .post("/api/send")
+      .send({ chat_id: 123, alert });
+    expect(res.status).toBe(200);
+    expect(notifyHeimdall).toHaveBeenCalledWith(alert);
+    // Ordering: the send must happen before the echo (echo is gated on success).
+    expect(sendMessage.mock.invocationCallOrder[0]).toBeLessThan(
+      notifyHeimdall.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("text + malformed alert → sends text, does NOT echo, logs safely (no raw value leak)", async () => {
+    const notifyHeimdall = vi.fn().mockResolvedValue(undefined);
+    const { app, sendMessage, logError } = makeApp({ notifyHeimdall });
+    const res = await request(app)
+      .post("/api/send")
+      .send({
+        chat_id: 123,
+        text: "hi",
+        alert: { body: "no title", secret_token: "supersecret" },
+      });
+    expect(res.status).toBe(200);
+    expect(sendMessage).toHaveBeenCalledWith(123, "hi");
+    expect(notifyHeimdall).not.toHaveBeenCalled();
+    expect(logError).toHaveBeenCalledOnce();
+    // The drop-log must NOT carry raw untrusted values into the log sink — only
+    // safe metadata (field names). The secret value must never be logged.
+    const logged = JSON.stringify(logError.mock.calls[0]);
+    expect(logged).not.toContain("supersecret");
+    expect(logged).toContain("secret_token"); // field name is safe metadata
+  });
+
+  it("whitespace-only text + valid alert → renders the alert (text falls through)", async () => {
+    const { app, sendMessage } = makeApp();
+    const res = await request(app)
+      .post("/api/send")
+      .send({ chat_id: 123, text: "   ", alert: { title: "Real" } });
+    expect(res.status).toBe(200);
+    expect(sendMessage).toHaveBeenCalledWith(123, "INFO — Real");
+  });
+
+  it("Heimdall echo failure is non-fatal → still 200, logged via logError", async () => {
+    const notifyHeimdall = vi
+      .fn()
+      .mockRejectedValue(new Error("heimdall down"));
+    const { app, sendMessage, logError } = makeApp({ notifyHeimdall });
+    const res = await request(app)
+      .post("/api/send")
+      .send({ chat_id: 123, alert: { title: "T" } });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+    expect(sendMessage).toHaveBeenCalledOnce();
+    expect(logError).toHaveBeenCalledOnce();
+  });
+
+  it("no echo when notifyHeimdall is not configured (alert sent, no crash)", async () => {
+    const { app, sendMessage } = makeApp(); // notifyHeimdall undefined
+    const res = await request(app)
+      .post("/api/send")
+      .send({ chat_id: 123, alert: { title: "T" } });
+    expect(res.status).toBe(200);
+    expect(sendMessage).toHaveBeenCalledOnce();
+  });
+
+  it("no echo on a plain text send with no alert", async () => {
+    const notifyHeimdall = vi.fn().mockResolvedValue(undefined);
+    const { app } = makeApp({ notifyHeimdall });
+    await request(app).post("/api/send").send({ chat_id: 123, text: "hi" });
+    expect(notifyHeimdall).not.toHaveBeenCalled();
+  });
+
+  it("send failure short-circuits before the Heimdall echo (no echo on 500)", async () => {
+    const notifyHeimdall = vi.fn().mockResolvedValue(undefined);
+    const sendMessage = vi.fn().mockRejectedValue(new Error("boom"));
+    const { app } = makeApp({ sendMessage, notifyHeimdall });
+    const res = await request(app)
+      .post("/api/send")
+      .send({ chat_id: 123, alert: { title: "T" } });
+    expect(res.status).toBe(500);
+    expect(notifyHeimdall).not.toHaveBeenCalled();
   });
 });
 

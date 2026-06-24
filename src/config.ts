@@ -20,6 +20,10 @@ export const config = {
   consolidationPollMs: parseInt(
     process.env.RATATOSKR_CONSOLIDATION_POLL_MS || "120000"
   ),
+  // Heimdall alert-bus echo (issue #16). When heimdallIngestUrl is unset the
+  // POST /api/send → Heimdall echo is skipped; the Telegram send is unaffected.
+  heimdallIngestUrl: process.env.HEIMDALL_INGEST_URL || "",
+  heimdallAlertToken: process.env.HEIMDALL_ALERT_TOKEN || "",
 };
 
 // Mirrors LOOPBACK_HOSTS in auth.ts — kept local so config validation has no
@@ -66,5 +70,17 @@ export function validateConfig(): void {
           `Pi's Tailscale IP instead (see docs/remote-send.md).`
       );
     }
+  }
+
+  // Heimdall alert-echo posture (issue #16). The echo runs only when BOTH the URL
+  // and the token are set; a URL without a token would POST an unauthenticated
+  // `Bearer ` that Heimdall's fail-closed ingest rejects (401), silently dropping
+  // every echoed alert. Warn loudly rather than degrade silently.
+  if (config.heimdallIngestUrl && !config.heimdallAlertToken) {
+    console.warn(
+      `⚠️  HEIMDALL_INGEST_URL is set but HEIMDALL_ALERT_TOKEN is empty — the ` +
+        `/api/send → Heimdall alert echo is DISABLED until the token is set ` +
+        `(Heimdall's ingest is fail-closed and would reject an unauthenticated POST).`
+    );
   }
 }

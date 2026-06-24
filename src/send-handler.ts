@@ -1,5 +1,10 @@
 import express, { type Express, type Request, type Response } from "express";
 import { requireSendApiKey } from "./auth.js";
+import {
+  type AlertEnvelope,
+  renderAlertText,
+  validateAlert,
+} from "./alert.js";
 
 export interface SendHandlerDeps {
   /** Send a Telegram message. In production this wraps `bot.api.sendMessage`. */
@@ -8,6 +13,12 @@ export interface SendHandlerDeps {
   allowedUsers: string[];
   /** Error sink for send failures. Injectable so tests can assert/silence it. */
   logError?: (message: string, err: unknown) => void;
+  /**
+   * Best-effort echo of an alert envelope to Heimdall's ingest. Optional —
+   * when unset (HEIMDALL_INGEST_URL unconfigured) the echo is skipped. A
+   * rejection here never fails the Telegram send (issue #16).
+   */
+  notifyHeimdall?: (alert: AlertEnvelope) => Promise<void>;
 }
 
 export interface SendRouteDeps extends SendHandlerDeps {
@@ -29,27 +40,78 @@ export function createSendHandler(
     deps.logError ?? ((message, err) => console.error(message, err));
 
   return async (req: Request, res: Response): Promise<void> => {
-    const { chat_id, text } = (req.body ?? {}) as {
+    const { chat_id, text, alert } = (req.body ?? {}) as {
       chat_id?: unknown;
       text?: unknown;
+      alert?: unknown;
     };
-    if (typeof chat_id !== "number" || typeof text !== "string" || !text) {
+
+    if (typeof chat_id !== "number") {
       res
         .status(400)
         .json({ error: "chat_id (number) and text (string) are required" });
       return;
     }
+
+    // Resolve the message to send: an explicit, non-blank `text` always wins and
+    // preserves the legacy behavior (any `alert` is ignored for rendering but
+    // still echoed). Otherwise fall back to rendering a valid `alert` envelope.
+    // Whitespace-only text falls through so a placeholder text alongside a real
+    // alert renders the alert rather than 500ing on an empty Telegram message.
+    const hasText = typeof text === "string" && text.trim().length > 0;
+    const validAlert = alert !== undefined ? validateAlert(alert) : null;
+
+    let messageText: string;
+    if (hasText) {
+      messageText = text as string;
+      // An alert was supplied but failed validation; text wins so it's silently
+      // dropped from both the render and the echo. Surface it for observability —
+      // but log only safe metadata (field names / type), never the raw untrusted
+      // payload, which could carry secrets or attacker-controlled bulk into logs.
+      if (alert !== undefined && !validAlert) {
+        const meta =
+          alert !== null && typeof alert === "object" && !Array.isArray(alert)
+            ? { invalidAlertFields: Object.keys(alert) }
+            : { invalidAlertType: Array.isArray(alert) ? "array" : typeof alert };
+        logError("Alert supplied but invalid; not rendered or echoed", meta);
+      }
+    } else if (validAlert) {
+      messageText = renderAlertText(validAlert);
+    } else if (alert !== undefined) {
+      // An alert was supplied but is malformed, and there is no text fallback.
+      res.status(400).json({ error: "alert.title (string) is required" });
+      return;
+    } else {
+      res
+        .status(400)
+        .json({ error: "chat_id (number) and text (string) are required" });
+      return;
+    }
+
     if (!deps.allowedUsers.includes(chat_id.toString())) {
       res.status(403).json({ error: "chat_id not in allowed users list" });
       return;
     }
+
     try {
-      await deps.sendMessage(chat_id, text);
-      res.json({ ok: true });
+      await deps.sendMessage(chat_id, messageText);
     } catch (err) {
       logError("Failed to send Telegram message:", err);
       res.status(500).json({ error: String(err) });
+      return;
     }
+
+    // Best-effort echo to Heimdall — only when a valid alert was supplied and a
+    // notifier is configured. A failure here must NOT fail the request.
+    if (validAlert && deps.notifyHeimdall) {
+      try {
+        await deps.notifyHeimdall(validAlert);
+      } catch (err) {
+        logError("Failed to echo alert to Heimdall:", err);
+      }
+    }
+
+    res.json({ ok: true });
   };
 }
 
