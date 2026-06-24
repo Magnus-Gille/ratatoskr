@@ -166,17 +166,28 @@ secret deployed on both sides.
 ## In Progress
 - Nothing — all changes merged and deployed.
 
-## Next Steps (provisioning — deferred to a focused ops session per Magnus, 2026-06-24)
-- **Provision a local Whisper endpoint for voice (#1):** stand up an
-  OpenAI-compatible `/v1/audio/transcriptions` server on the m5/on-box, then set
-  `RATATOSKR_TRANSCRIBE_URL` (+ optional `_TOKEN`) on the Pi. Until then voice
-  notes get a polite "not wired up yet" reply.
-- **Provision the Heimdall echo (#16):** set `HEIMDALL_INGEST_URL`
-  (e.g. `http://huginmunin:3033/api/alerts`) + `HEIMDALL_ALERT_TOKEN` (must match
-  Heimdall's token) on the Pi.
-- **Deploy the signing secret** (PR #5, still dormant): `RATATOSKR_SIGNING_SECRET`
-  (64-char hex) on the Pi + matching `HUGIN_SUBMITTER_KEYS` `{"ratatoskr":"<hex>"}`
-  on Hugin, then flip `HUGIN_SIGNING_POLICY=warn`. Cross-repo + prod secret.
+## Ops session 2026-06-24 (provisioning) — outcomes
+
+Recon found the documented plan was stale; resolved all three:
+- **Signing (PR #5): already provisioned** — verified on-box `RATATOSKR_SIGNING_SECRET`
+  == Hugin `HUGIN_SUBMITTER_KEYS["ratatoskr"]`, `HUGIN_SIGNING_POLICY=warn`. No change.
+- **Heimdall echo (#16): LIVE** — Heimdall had no `HEIMDALL_ALERT_TOKEN` (rejected all);
+  generated a shared token, set it on Heimdall (systemd drop-in) + Ratatoskr `.env`,
+  verified wrong→401 / right→200.
+- **Voice (#1): LIVE** — reused the existing **KB-Whisper (Swedish)** server on m5,
+  rebound from loopback to the Tailscale IP (`100.76.72.59:8092`, `--convert`), wired
+  `RATATOSKR_TRANSCRIBE_URL` on the Pi. OGG→transcript + Pi→m5 path verified. (Note: an
+  accidental overwrite of m5's `whisper-server.service` was caught + restored.)
+
+## Next Steps
+- **⚠️ m5 is currently DOWN** — voice transcription is non-functional until it returns
+  (Ratatoskr degrades gracefully: voice notes get "transcription failed — check the
+  voice endpoint"). When m5 is back: confirm `whisper-server.service` auto-recovered
+  tailnet-bound on `100.76.72.59:8092`, then run the live voice-note test.
+- **Live UX tests (pending):** a real Telegram voice note → `Heard: …` → concierge;
+  and a `POST /api/send` with an `alert` envelope → Telegram + Heimdall strip.
+- **m5 caveat:** KB-Whisper is now tailnet-bound (not loopback) — update any local-only
+  m5 consumer of `127.0.0.1:8092` to `100.76.72.59:8092`, or rebind `0.0.0.0`.
 - **#1 follow-up:** document routing (PDF/txt) — separate from transcription.
 - Prior backlog: grimnir #31 (restart-after-dep-upgrade); pendingReplyContext
   per-message keying.
