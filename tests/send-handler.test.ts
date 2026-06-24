@@ -281,16 +281,25 @@ describe("POST /api/send route (integration via registerSendRoute)", () => {
     );
   });
 
-  it("text + malformed alert → sends text, does NOT echo, logs the dropped alert", async () => {
+  it("text + malformed alert → sends text, does NOT echo, logs safely (no raw value leak)", async () => {
     const notifyHeimdall = vi.fn().mockResolvedValue(undefined);
     const { app, sendMessage, logError } = makeApp({ notifyHeimdall });
     const res = await request(app)
       .post("/api/send")
-      .send({ chat_id: 123, text: "hi", alert: { body: "no title" } });
+      .send({
+        chat_id: 123,
+        text: "hi",
+        alert: { body: "no title", secret_token: "supersecret" },
+      });
     expect(res.status).toBe(200);
     expect(sendMessage).toHaveBeenCalledWith(123, "hi");
     expect(notifyHeimdall).not.toHaveBeenCalled();
     expect(logError).toHaveBeenCalledOnce();
+    // The drop-log must NOT carry raw untrusted values into the log sink — only
+    // safe metadata (field names). The secret value must never be logged.
+    const logged = JSON.stringify(logError.mock.calls[0]);
+    expect(logged).not.toContain("supersecret");
+    expect(logged).toContain("secret_token"); // field name is safe metadata
   });
 
   it("whitespace-only text + valid alert → renders the alert (text falls through)", async () => {

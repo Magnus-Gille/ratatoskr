@@ -102,8 +102,8 @@ see **`docs/remote-send.md`** (bind `HOST` to the Tailscale IP + set
 | `RATATOSKR_SIGNING_SECRET` | — | HMAC-SHA256 secret for Hugin task submission signing (PR #5) |
 | `RATATOSKR_SIGNING_KEY_ID` | `ratatoskr` | Key ID advertised alongside signed task submissions |
 | `RATATOSKR_CONSOLIDATION_POLL_MS` | `120000` | Interval for polling Munin consolidation-worker health |
-| `HEIMDALL_INGEST_URL` | — | Heimdall `/api/alerts` ingest URL. When set, an `alert` posted to `/api/send` is best-effort echoed to Heimdall. Unset → echo skipped (issue #16). |
-| `HEIMDALL_ALERT_TOKEN` | — | Bearer token for Heimdall's fail-closed alert ingest, sent on the echo. |
+| `HEIMDALL_INGEST_URL` | — | Heimdall `/api/alerts` ingest URL. The `/api/send` → Heimdall echo runs only when **both** this and `HEIMDALL_ALERT_TOKEN` are set; either unset → echo skipped (issue #16). |
+| `HEIMDALL_ALERT_TOKEN` | — | Bearer token for Heimdall's fail-closed alert ingest, sent on the echo. Required alongside `HEIMDALL_INGEST_URL` to enable the echo. |
 
 ## Concierge design
 

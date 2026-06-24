@@ -71,4 +71,16 @@ export function validateConfig(): void {
       );
     }
   }
+
+  // Heimdall alert-echo posture (issue #16). The echo runs only when BOTH the URL
+  // and the token are set; a URL without a token would POST an unauthenticated
+  // `Bearer ` that Heimdall's fail-closed ingest rejects (401), silently dropping
+  // every echoed alert. Warn loudly rather than degrade silently.
+  if (config.heimdallIngestUrl && !config.heimdallAlertToken) {
+    console.warn(
+      `⚠️  HEIMDALL_INGEST_URL is set but HEIMDALL_ALERT_TOKEN is empty — the ` +
+        `/api/send → Heimdall alert echo is DISABLED until the token is set ` +
+        `(Heimdall's ingest is fail-closed and would reject an unauthenticated POST).`
+    );
+  }
 }

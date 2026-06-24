@@ -100,4 +100,29 @@ describe("config validation", () => {
     expect(() => validateConfig()).not.toThrow();
     expect(mockWarn).not.toHaveBeenCalled();
   });
+
+  // Heimdall alert-echo partial-config (issue #16). Setting the URL without the
+  // token silently degrades the echo (unauthenticated Bearer → Heimdall 401), so
+  // validateConfig must warn loudly (but not exit).
+  it("warns when HEIMDALL_INGEST_URL is set without HEIMDALL_ALERT_TOKEN", async () => {
+    setRequired();
+    process.env.HEIMDALL_INGEST_URL = "http://huginmunin:3033/api/alerts";
+    delete process.env.HEIMDALL_ALERT_TOKEN;
+
+    const { validateConfig } = await import("../src/config.js");
+    expect(() => validateConfig()).not.toThrow();
+    expect(mockWarn).toHaveBeenCalledWith(
+      expect.stringContaining("HEIMDALL_ALERT_TOKEN")
+    );
+  });
+
+  it("emits no Heimdall warning when both URL and token are set", async () => {
+    setRequired();
+    process.env.HEIMDALL_INGEST_URL = "http://huginmunin:3033/api/alerts";
+    process.env.HEIMDALL_ALERT_TOKEN = "tok";
+
+    const { validateConfig } = await import("../src/config.js");
+    expect(() => validateConfig()).not.toThrow();
+    expect(mockWarn).not.toHaveBeenCalled();
+  });
 });

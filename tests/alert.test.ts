@@ -104,6 +104,47 @@ describe("validateAlert", () => {
     const out = validateAlert({ title: "T", links: [{ label: "x" }] } as any);
     expect(out).toEqual({ title: "T" });
   });
+
+  it("drops links with unsafe URL schemes (javascript:/data:/file:)", () => {
+    const out = validateAlert({
+      title: "T",
+      links: [
+        { label: "xss", url: "javascript:alert(1)" },
+        { label: "data", url: "data:text/html,<script>alert(1)</script>" },
+        { label: "file", url: "file:///etc/passwd" },
+        { label: "ok", url: "https://safe" },
+      ],
+    } as any);
+    expect(out?.links).toEqual([{ label: "ok", url: "https://safe" }]);
+  });
+
+  it("drops links whose url is not a parseable URL", () => {
+    const out = validateAlert({
+      title: "T",
+      links: [
+        { label: "broken", url: "not a url" },
+        { label: "ok", url: "http://ok" },
+      ],
+    } as any);
+    expect(out?.links).toEqual([{ label: "ok", url: "http://ok" }]);
+  });
+
+  it("trims surrounding whitespace on kept link label/url", () => {
+    const out = validateAlert({
+      title: "T",
+      links: [{ label: "  lab  ", url: "  https://ok  " }],
+    } as any);
+    expect(out?.links).toEqual([{ label: "lab", url: "https://ok" }]);
+  });
+
+  it("caps the number of links to a bounded maximum", () => {
+    const links = Array.from({ length: 50 }, (_, i) => ({
+      label: `l${i}`,
+      url: `https://x/${i}`,
+    }));
+    const out = validateAlert({ title: "T", links } as any);
+    expect(out?.links!.length).toBeLessThanOrEqual(10);
+  });
 });
 
 describe("renderAlertText", () => {

@@ -28,6 +28,24 @@ export interface AlertLink {
   url: string;
 }
 
+/** Cap on links carried across the trust boundary into Heimdall / the render. */
+const MAX_LINKS = 10;
+
+/**
+ * A link URL is renderable only if it parses and uses http/https. This blocks
+ * `javascript:`, `data:`, `file:`, and other schemes that a downstream display
+ * surface (Heimdall renders links as clickable) could execute or mis-handle.
+ */
+function isSafeHttpUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === "http:" || parsed.protocol === "https:";
+}
+
 export interface AlertEnvelope {
   severity?: AlertSeverity;
   source?: string;
@@ -70,18 +88,19 @@ export function validateAlert(value: unknown): AlertEnvelope | null {
   if (Array.isArray(a.links)) {
     const links: AlertLink[] = [];
     for (const link of a.links) {
+      if (links.length >= MAX_LINKS) break;
       if (
-        link &&
-        typeof link === "object" &&
-        typeof (link as AlertLink).label === "string" &&
-        typeof (link as AlertLink).url === "string" &&
-        (link as AlertLink).label.trim() !== "" &&
-        (link as AlertLink).url.trim() !== ""
+        !link ||
+        typeof link !== "object" ||
+        typeof (link as AlertLink).label !== "string" ||
+        typeof (link as AlertLink).url !== "string"
       ) {
-        links.push({
-          label: (link as AlertLink).label,
-          url: (link as AlertLink).url,
-        });
+        continue;
+      }
+      const label = (link as AlertLink).label.trim();
+      const url = (link as AlertLink).url.trim();
+      if (label !== "" && url !== "" && isSafeHttpUrl(url)) {
+        links.push({ label, url });
       }
     }
     if (links.length > 0) alert.links = links;

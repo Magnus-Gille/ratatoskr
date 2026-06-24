@@ -65,9 +65,15 @@ export function createSendHandler(
     if (hasText) {
       messageText = text as string;
       // An alert was supplied but failed validation; text wins so it's silently
-      // dropped from both the render and the echo. Surface it for observability.
+      // dropped from both the render and the echo. Surface it for observability —
+      // but log only safe metadata (field names / type), never the raw untrusted
+      // payload, which could carry secrets or attacker-controlled bulk into logs.
       if (alert !== undefined && !validAlert) {
-        logError("Alert supplied but invalid; not rendered or echoed:", alert);
+        const meta =
+          alert !== null && typeof alert === "object" && !Array.isArray(alert)
+            ? { invalidAlertFields: Object.keys(alert) }
+            : { invalidAlertType: Array.isArray(alert) ? "array" : typeof alert };
+        logError("Alert supplied but invalid; not rendered or echoed", meta);
       }
     } else if (validAlert) {
       messageText = renderAlertText(validAlert);
