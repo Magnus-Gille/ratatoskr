@@ -29,7 +29,7 @@ Part of the Grimnir system: **Munin** (memory), **Hugin** (task dispatcher), **R
 - `src/concierge.ts` — Intent triage via Claude Haiku API (multimodal: text + images), result summarization
 - `src/soul.ts` — `RATATOSKR_SOUL` constant defining Ratatoskr's voice/personality for all Telegram output
 - `src/task-writer.ts` — Format task markdown, write to Munin (with instance tag)
-- `src/result-poller.ts` — Poll Munin for task results, delivery confirmation
+- `src/result-poller.ts` — Poll Munin for task results, delivery confirmation; fires a one-time "picked up" ack on the first `running` transition (issue #2), de-duped via a persisted Munin marker so a restart doesn't re-announce
 - `src/recovery.ts` — Startup recovery: reattach polls, deliver undelivered results
 - `src/munin-client.ts` — HTTP client for Munin JSON-RPC API
 - `src/telegram-util.ts` — Result formatting: metadata extraction, markdown stripping, summarization pipeline, truncation

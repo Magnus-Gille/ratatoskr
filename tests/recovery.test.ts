@@ -130,7 +130,8 @@ describe("recoverActivePolls", () => {
     expect(recovered).toBe(1);
     expect(poller.startPolling).toHaveBeenCalledWith(
       "20260325-100000-test",
-      expect.any(Function)
+      expect.any(Function),
+      expect.any(Function) // onPickup — intermediate "picked up" ack (issue #2)
     );
   });
 

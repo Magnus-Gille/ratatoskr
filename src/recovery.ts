@@ -39,6 +39,16 @@ function makeDeliveryCallback(
   };
 }
 
+function makePickupCallback(
+  botApi: Api,
+  chatId: number
+): (message: string) => Promise<void> {
+  // Failures propagate so the poller retries and only marks "acked" on success.
+  return async (message: string) => {
+    await botApi.sendMessage(chatId, message);
+  };
+}
+
 export async function recoverActivePolls(
   munin: MuninClient,
   poller: ResultPoller,
@@ -77,7 +87,8 @@ export async function recoverActivePolls(
     const taskId = task.namespace.replace(/^tasks\//, "");
     poller.startPolling(
       taskId,
-      makeDeliveryCallback(botApi, taskId, meta.chatId)
+      makeDeliveryCallback(botApi, taskId, meta.chatId),
+      makePickupCallback(botApi, meta.chatId)
     );
     recovered++;
   }
