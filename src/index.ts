@@ -1,6 +1,7 @@
 import express from "express";
 import { config, validateConfig } from "./config.js";
 import { registerSendRoute } from "./send-handler.js";
+import { createHeimdallNotifier } from "./alert.js";
 import { MuninClient } from "./munin-client.js";
 import { ResultPoller } from "./result-poller.js";
 import { createBot } from "./bot.js";
@@ -34,11 +35,21 @@ app.get("/health", (_req, res) => {
   });
 });
 
+// Best-effort Heimdall echo for alert-envelope sends (issue #16). Skipped when
+// HEIMDALL_INGEST_URL is unset — `undefined` notifier disables the echo path.
+const notifyHeimdall = config.heimdallIngestUrl
+  ? createHeimdallNotifier({
+      url: config.heimdallIngestUrl,
+      token: config.heimdallAlertToken,
+    })
+  : undefined;
+
 registerSendRoute(app, {
   sendMessage: (chatId, text) => bot.api.sendMessage(chatId, text),
   allowedUsers: config.allowedUsers,
   sendApiKey: config.sendApiKey,
   host: config.host,
+  notifyHeimdall,
 });
 
 const server = app.listen(config.port, config.host, () => {

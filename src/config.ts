@@ -20,6 +20,10 @@ export const config = {
   consolidationPollMs: parseInt(
     process.env.RATATOSKR_CONSOLIDATION_POLL_MS || "120000"
   ),
+  // Heimdall alert-bus echo (issue #16). When heimdallIngestUrl is unset the
+  // POST /api/send → Heimdall echo is skipped; the Telegram send is unaffected.
+  heimdallIngestUrl: process.env.HEIMDALL_INGEST_URL || "",
+  heimdallAlertToken: process.env.HEIMDALL_ALERT_TOKEN || "",
 };
 
 // Mirrors LOOPBACK_HOSTS in auth.ts — kept local so config validation has no
