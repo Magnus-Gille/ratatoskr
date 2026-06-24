@@ -50,6 +50,12 @@ export const config = {
     process.env.RATATOSKR_CONCIERGE_RATE_WINDOW_MS,
     60000
   ),
+  // Voice-message transcription (issue #1). Points at a local, OpenAI-compatible
+  // Whisper endpoint (m5 / on-box) so audio never leaves Magnus's hardware. When
+  // transcribeUrl is unset, voice messages are politely declined (no transcription).
+  transcribeUrl: process.env.RATATOSKR_TRANSCRIBE_URL || "",
+  transcribeModel: process.env.RATATOSKR_TRANSCRIBE_MODEL || "whisper-1",
+  transcribeToken: process.env.RATATOSKR_TRANSCRIBE_TOKEN || "",
 };
 
 // Mirrors LOOPBACK_HOSTS in auth.ts — kept local so config validation has no
