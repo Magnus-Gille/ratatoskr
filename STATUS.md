@@ -1,9 +1,42 @@
 # Ratatoskr Status
 
-**Last session:** 2026-06-20
+**Last session:** 2026-06-24
 **Branch:** main
 
-## Completed This Session (2026-06-20)
+## Completed This Session (2026-06-24) — autonomous, 3 PRs merged
+
+All three landed test-first (red→green), each with a 4-lens adversarial review
+and a cross-model Codex review (gpt-5.5, xhigh) whose findings were fixed before
+merge. Suite grew 163 → 223, tsc clean throughout. **Not yet deployed to the Pi.**
+
+### #16 Alert bus on POST /api/send (PR #17, merged `f713479`)
+`/api/send` now accepts an optional standard `alert` envelope: renders a Telegram
+message from it when `text` is absent, and best-effort echoes the envelope to
+Heimdall's fail-closed `/api/alerts` ingest (`HEIMDALL_INGEST_URL` +
+`HEIMDALL_ALERT_TOKEN`; both required, else echo skipped). New `src/alert.ts`
+(`validateAlert` rebuilds a clean allowlisted/type-checked envelope incl. http(s)-
+only link validation; `renderAlertText` self-bounds to 4096; `createHeimdallNotifier`,
+3s timeout). Codex fixes: truncation, allowlisted rebuild, log hygiene, both-vars
+gating + config warning.
+
+### #2 "Picked up" ack on first in-progress transition (PR #18, merged `3267d4d`)
+`ResultPoller.startPolling` gains an optional `onPickup` — fires once on the first
+`running` observation, de-duped by an in-memory guard + a persisted Munin `pickup`
+marker (no re-ack across restart). Wired into all 4 bot task paths + recovery.
+Codex fixes: per-task `polling` serialization guard (no overlapping polls →
+no double-deliver / out-of-order pickup), marker written only after a successful
+ack (retries on failure).
+
+### #3 Per-user concierge rate limit (PR #19, merged `519be4a`)
+New `src/rate-limiter.ts` (`SlidingWindowRateLimiter`, pure/time-injectable) caps
+Haiku triage calls per chat (`RATATOSKR_CONCIERGE_RATE_LIMIT`=8 /
+`_WINDOW_MS`=60000). Gates both text + photo paths; over-limit → throttled "slow
+down" notice. Codex fixes: consume reply-context before the gate (no leak),
+sanitize NaN/≤0 config to safe defaults, evict empty limiter keys, `.env.example`.
+
+## Earlier — 2026-06-20
+
+## Completed (2026-06-20)
 
 ### Fix: resilient listener bind (PR #11, deployed)
 
@@ -120,12 +153,18 @@ secret deployed on both sides.
 ## In Progress
 - Nothing — all changes merged and deployed.
 
-## Next Steps
-- **Deploy signing secret** to Pi env: set `RATATOSKR_SIGNING_SECRET`
-  (64-char hex) and the matching `HUGIN_SUBMITTER_KEYS` entry
-  `{"ratatoskr": "<same-hex>"}` on Hugin. Flip `HUGIN_SIGNING_POLICY=warn`
-  to watch for stragglers. (PR #5 code is shipped but dormant until provisioned.)
-- "Task picked up" intermediate notification (#2) — ack on first in-progress transition
-- Concierge per-user rate limiting / debounce (#3)
-- Non-text messages (#1): voice transcription + document routing (photos already work)
-- Prior backlog: grimnir #31 (restart-after-dep-upgrade); pendingReplyContext per-message keying
+## Next Steps (need a decision / ops action — surfaced to Magnus 2026-06-24)
+- **Deploy #16 / #2 / #3 to the Pi** (`./scripts/deploy-pi.sh huginmunin.local`).
+  All three are merged to main but dormant until deployed — outward-facing prod
+  action on the live bot, so not auto-deployed.
+- **Provision the Heimdall echo** (so #16 actually echoes): set `HEIMDALL_INGEST_URL`
+  (e.g. `http://huginmunin:3033/api/alerts`) + `HEIMDALL_ALERT_TOKEN` on the Pi —
+  the token must match Heimdall's `HEIMDALL_ALERT_TOKEN` (cross-service).
+- **Deploy the signing secret** (PR #5, still dormant): `RATATOSKR_SIGNING_SECRET`
+  (64-char hex) on the Pi + matching `HUGIN_SUBMITTER_KEYS` `{"ratatoskr":"<hex>"}`
+  on Hugin, then flip `HUGIN_SIGNING_POLICY=warn`. Cross-repo + prod secret.
+- **#1 Non-text messages** — voice transcription + document routing (photos already
+  work). Needs a transcription-backend decision (Whisper API vs local/m5 vs other)
+  before implementing.
+- Prior backlog: grimnir #31 (restart-after-dep-upgrade); pendingReplyContext
+  per-message keying.
