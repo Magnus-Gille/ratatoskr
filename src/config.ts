@@ -50,7 +50,51 @@ export const config = {
     process.env.RATATOSKR_CONCIERGE_RATE_WINDOW_MS,
     60000
   ),
+  // Voice-message transcription (issue #1). Points at a local, OpenAI-compatible
+  // Whisper endpoint (m5 / on-box) so audio never leaves Magnus's hardware. When
+  // transcribeUrl is unset, voice messages are politely declined (no transcription).
+  transcribeUrl: process.env.RATATOSKR_TRANSCRIBE_URL || "",
+  transcribeModel: process.env.RATATOSKR_TRANSCRIBE_MODEL || "whisper-1",
+  transcribeToken: process.env.RATATOSKR_TRANSCRIBE_TOKEN || "",
+  // Acknowledge sending audio off-box (suppresses the non-local-endpoint warning).
+  transcribeAllowRemote:
+    (process.env.RATATOSKR_TRANSCRIBE_ALLOW_REMOTE || "").toLowerCase() ===
+    "true",
+  // Reject voice notes longer than this (seconds) before downloading/transcribing.
+  voiceMaxDurationS: positiveIntEnv(
+    process.env.RATATOSKR_VOICE_MAX_DURATION_S,
+    300
+  ),
 };
+
+/**
+ * True when a URL's host is plausibly on the local box / private network — used
+ * to back the "audio never leaves the box" privacy posture for transcription.
+ * Covers loopback, bare hostnames (e.g. "m5"), .local/.internal, RFC1918 private
+ * IPv4, and the Tailscale CGNAT range (100.64.0.0/10).
+ */
+export function isLocalHost(urlStr: string): boolean {
+  let host: string;
+  try {
+    host = new URL(urlStr).hostname;
+  } catch {
+    return false;
+  }
+  if (host === "localhost" || host === "::1") return true;
+  if (host.endsWith(".local") || host.endsWith(".internal")) return true;
+  if (!host.includes(".")) return true; // bare hostname like "m5", "huginmunin"
+  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const [a, b] = [parseInt(m[1], 10), parseInt(m[2], 10)];
+    if (a === 127) return true; // loopback
+    if (a === 10) return true; // 10.0.0.0/8
+    if (a === 192 && b === 168) return true; // 192.168.0.0/16
+    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+    if (a === 100 && b >= 64 && b <= 127) return true; // Tailscale CGNAT 100.64/10
+    return false;
+  }
+  return false; // a public hostname/IP
+}
 
 // Mirrors LOOPBACK_HOSTS in auth.ts — kept local so config validation has no
 // dependency on the auth layer. Wildcard binds expose every interface.
@@ -121,6 +165,21 @@ export function validateConfig(): void {
       `⚠️  RATATOSKR_CONCIERGE_RATE_LIMIT / _WINDOW_MS is invalid (expected positive ` +
         `integers) — falling back to defaults ` +
         `(limit=${config.conciergeRateLimit}, windowMs=${config.conciergeRateWindowMs}).`
+    );
+  }
+
+  // Voice transcription privacy posture (issue #1). The docs promise audio stays
+  // on-box; warn loudly if the configured endpoint is NOT local, unless the
+  // operator explicitly opts into remote transcription.
+  if (
+    config.transcribeUrl &&
+    !config.transcribeAllowRemote &&
+    !isLocalHost(config.transcribeUrl)
+  ) {
+    console.warn(
+      `⚠️  RATATOSKR_TRANSCRIBE_URL (${config.transcribeUrl}) does not look local — ` +
+        `voice audio would be sent OFF-BOX to it. Use a local Whisper endpoint, or set ` +
+        `RATATOSKR_TRANSCRIBE_ALLOW_REMOTE=true to acknowledge sending audio remotely.`
     );
   }
 }

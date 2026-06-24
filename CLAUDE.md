@@ -25,7 +25,7 @@ Part of the Grimnir system: **Munin** (memory), **Hugin** (task dispatcher), **R
 ### Components
 
 - `src/index.ts` — Express app (health endpoint + registers `/api/send` route) + bot startup + poll recovery
-- `src/bot.ts` — Telegram bot setup, message/photo handlers, allowlist, conversation persistence
+- `src/bot.ts` — Telegram bot setup, message/photo/voice handlers, allowlist, conversation persistence; shared `handleTriageResult` drives submit/clarify/answer for all input types
 - `src/concierge.ts` — Intent triage via Claude Haiku API (multimodal: text + images), result summarization
 - `src/soul.ts` — `RATATOSKR_SOUL` constant defining Ratatoskr's voice/personality for all Telegram output
 - `src/task-writer.ts` — Format task markdown, write to Munin (with instance tag)
@@ -33,7 +33,8 @@ Part of the Grimnir system: **Munin** (memory), **Hugin** (task dispatcher), **R
 - `src/recovery.ts` — Startup recovery: reattach polls, deliver undelivered results
 - `src/munin-client.ts` — HTTP client for Munin JSON-RPC API
 - `src/telegram-util.ts` — Result formatting: metadata extraction, markdown stripping, summarization pipeline, truncation
-- `src/telegram-file.ts` — Download photos from Telegram's file API
+- `src/telegram-file.ts` — Download media from Telegram's file API: `downloadPhoto` (base64 image) + `downloadFile` (raw bytes for voice/audio, issue #1)
+- `src/transcribe.ts` — `createTranscriber`: posts audio to a local OpenAI-compatible `/v1/audio/transcriptions` Whisper endpoint (config-gated, audio stays on-box) and returns the transcript (issue #1)
 - `src/message-tracker.ts` — In-memory tracker mapping outbound Telegram message IDs to context (for reply awareness)
 - `src/message-aggregator.ts` — Debounce rapid Telegram message fragments into single logical messages
 - `src/rate-limiter.ts` — `SlidingWindowRateLimiter`: per-key sliding-window limiter (pure, time-injectable). Caps concierge/Haiku triage calls per chat so a message burst can't fan out into unbounded API calls (issue #3)
@@ -107,6 +108,11 @@ see **`docs/remote-send.md`** (bind `HOST` to the Tailscale IP + set
 | `HEIMDALL_ALERT_TOKEN` | — | Bearer token for Heimdall's fail-closed alert ingest, sent on the echo. Required alongside `HEIMDALL_INGEST_URL` to enable the echo. |
 | `RATATOSKR_CONCIERGE_RATE_LIMIT` | `8` | Max concierge (Haiku) triage calls per chat per window before messages are rate-limited (issue #3). |
 | `RATATOSKR_CONCIERGE_RATE_WINDOW_MS` | `60000` | Sliding-window size for the concierge rate limit. |
+| `RATATOSKR_TRANSCRIBE_URL` | — | Local OpenAI-compatible Whisper endpoint for voice messages (issue #1). Unset → voice messages politely declined; audio never leaves the box. |
+| `RATATOSKR_TRANSCRIBE_MODEL` | `whisper-1` | Model name sent to the transcription endpoint. |
+| `RATATOSKR_TRANSCRIBE_TOKEN` | — | Optional Bearer token if the local transcription endpoint is auth-gated. |
+| `RATATOSKR_TRANSCRIBE_ALLOW_REMOTE` | `false` | Opt-in to a non-local transcription endpoint (suppresses the "audio off-box" startup warning). |
+| `RATATOSKR_VOICE_MAX_DURATION_S` | `300` | Reject voice notes longer than this (seconds) before downloading/transcribing. |
 
 ## Concierge design
 

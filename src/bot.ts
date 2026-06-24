@@ -9,7 +9,8 @@ import { MessageAggregator } from "./message-aggregator.js";
 import { SlidingWindowRateLimiter } from "./rate-limiter.js";
 import { MessageTracker } from "./message-tracker.js";
 import type { TrackedMessage } from "./message-tracker.js";
-import { downloadPhoto } from "./telegram-file.js";
+import { downloadPhoto, downloadFile } from "./telegram-file.js";
+import { createTranscriber, checkVoiceLimits } from "./transcribe.js";
 
 /**
  * Build the one-time "picked up" ack callback for a task. Replies on the same
@@ -63,6 +64,9 @@ interface ConversationState {
 
 const CONVERSATION_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_HISTORY = 5;
+// Upper bound on a voice transcript before it's echoed / triaged / persisted, so
+// a long note can't bloat the concierge prompt or Munin conversation state.
+const MAX_TRANSCRIPT_CHARS = 8000;
 const CONVERSATION_NAMESPACE = "ratatoskr/conversations";
 
 function formatDuration(seconds: number): string {
@@ -73,6 +77,9 @@ function formatDuration(seconds: number): string {
 
 function conciergeErrorReason(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
+  // Transcription errors must classify before the generic JSON branch, else an
+  // invalid-JSON transcription response reads as "Haiku returned gibberish".
+  if (/transcri/i.test(msg)) return "transcription failed — check the voice endpoint";
   if (/rate.?limit|429/i.test(msg)) return "API rate limit, wait a moment";
   if (/timeout|ETIMEDOUT|ECONNABORTED/i.test(msg)) return "API timed out";
   if (/ECONNREFUSED|ENOTFOUND|fetch failed/i.test(msg)) return "can't reach API";
@@ -168,6 +175,16 @@ export function createBot(
     return false;
   }
 
+  // Voice transcription (issue #1) — only enabled when a local Whisper endpoint
+  // is configured; otherwise voice messages are politely declined.
+  const transcriber = config.transcribeUrl
+    ? createTranscriber({
+        url: config.transcribeUrl,
+        model: config.transcribeModel,
+        token: config.transcribeToken || undefined,
+      })
+    : null;
+
   function isAllowed(ctx: Context): boolean {
     const userId = ctx.from?.id?.toString();
     if (!userId || !config.allowedUsers.includes(userId)) return false;
@@ -219,6 +236,69 @@ export function createBot(
   async function clearConversation(chatId: string): Promise<void> {
     conversations.delete(chatId);
     await deleteConversation(munin, chatId);
+  }
+
+  // Shared concierge-result handler for the text, photo, and voice paths: submit
+  // + ack + poll (ready), record + reply (clarify), or reply (answer).
+  // `userHistoryText` is stored as the user turn when clarifying.
+  async function handleTriageResult(
+    ctx: Context,
+    chatId: string,
+    result: Awaited<ReturnType<typeof triage>>,
+    userHistoryText: string
+  ): Promise<void> {
+    switch (result.action) {
+      case "ready": {
+        await clearConversation(chatId);
+        const taskId = await submitTask({ ...result.task, chatId }, munin);
+        const duration = formatDuration(result.task.timeout);
+        const ackSent = await ctx.reply(
+          `Got it, submitting to ${result.task.context}. ~${duration}.`
+        );
+        messageTracker.track(ackSent.message_id, { type: "ack", taskId });
+        poller.startPolling(
+          taskId,
+          async (pollResult) => {
+            try {
+              const resultText = await formatResultWithSummary(
+                pollResult,
+                taskId,
+                summarizeResult
+              );
+              const sent = await ctx.reply(resultText);
+              messageTracker.track(sent.message_id, {
+                type: "result",
+                taskId,
+                snippet: resultText.slice(0, 200),
+              });
+            } catch (err) {
+              console.error(`Failed to deliver result for ${taskId}:`, err);
+            }
+          },
+          makePickupAck(ctx)
+        );
+        break;
+      }
+      case "clarify": {
+        await addToConversation(chatId, "user", userHistoryText);
+        await addToConversation(chatId, "assistant", result.question);
+        const sent = await ctx.reply(result.question);
+        messageTracker.track(sent.message_id, {
+          type: "clarify",
+          snippet: result.question.slice(0, 200),
+        });
+        break;
+      }
+      case "answer": {
+        await clearConversation(chatId);
+        const sent = await ctx.reply(result.reply);
+        messageTracker.track(sent.message_id, {
+          type: "answer",
+          snippet: result.reply.slice(0, 200),
+        });
+        break;
+      }
+    }
   }
 
   // --- Commands ---
@@ -425,63 +505,7 @@ Or just send a message and the concierge will triage it.`
           const history = await getConversation(chatId);
           const muninContext = await gatherContext(munin);
           const result = await triage(message, history, muninContext, replyCtx);
-
-          switch (result.action) {
-            case "ready": {
-              await clearConversation(chatId);
-              const taskId = await submitTask(
-                {
-                  ...result.task,
-                  chatId,
-                },
-                munin
-              );
-              const duration = formatDuration(result.task.timeout);
-              const ackText = `Got it, submitting to ${result.task.context}. ~${duration}.`;
-              const ackSent = await ctx.reply(ackText);
-              messageTracker.track(ackSent.message_id, { type: "ack", taskId });
-              poller.startPolling(
-                taskId,
-                async (pollResult) => {
-                  try {
-                    const resultText = await formatResultWithSummary(pollResult, taskId, summarizeResult);
-                    const sent = await ctx.reply(resultText);
-                    messageTracker.track(sent.message_id, {
-                      type: "result",
-                      taskId,
-                      snippet: resultText.slice(0, 200),
-                    });
-                  } catch (err) {
-                    console.error(
-                      `Failed to deliver result for ${taskId}:`,
-                      err
-                    );
-                  }
-                },
-                makePickupAck(ctx)
-              );
-              break;
-            }
-            case "clarify": {
-              await addToConversation(chatId, "user", message);
-              await addToConversation(chatId, "assistant", result.question);
-              const clarifySent = await ctx.reply(result.question);
-              messageTracker.track(clarifySent.message_id, {
-                type: "clarify",
-                snippet: result.question.slice(0, 200),
-              });
-              break;
-            }
-            case "answer": {
-              await clearConversation(chatId);
-              const answerSent = await ctx.reply(result.reply);
-              messageTracker.track(answerSent.message_id, {
-                type: "answer",
-                snippet: result.reply.slice(0, 200),
-              });
-              break;
-            }
-          }
+          await handleTriageResult(ctx, chatId, result, message);
         } catch (err) {
           console.error("Concierge error:", err);
           const reason = conciergeErrorReason(err);
@@ -531,60 +555,81 @@ Or just send a message and the concierge will triage it.`
         ? `[sent a photo with caption: "${caption}"]`
         : "[sent a photo]";
 
-      switch (result.action) {
-        case "ready": {
-          await clearConversation(chatId);
-          const taskId = await submitTask(
-            { ...result.task, chatId },
-            munin
-          );
-          const duration = formatDuration(result.task.timeout);
-          const sent = await ctx.reply(
-            `Got it, submitting to ${result.task.context}. ~${duration}.`
-          );
-          messageTracker.track(sent.message_id, { type: "ack", taskId });
-          poller.startPolling(
-            taskId,
-            async (pollResult) => {
-              try {
-                const sent = await ctx.reply(await formatResultWithSummary(pollResult, taskId, summarizeResult));
-                messageTracker.track(sent.message_id, {
-                  type: "result",
-                  taskId,
-                  snippet: pollResult.slice(0, 200),
-                });
-              } catch (err) {
-                console.error(`Failed to deliver result for ${taskId}:`, err);
-              }
-            },
-            makePickupAck(ctx)
-          );
-          break;
-        }
-        case "clarify": {
-          await addToConversation(chatId, "user", historyEntry);
-          await addToConversation(chatId, "assistant", result.question);
-          const sent = await ctx.reply(result.question);
-          messageTracker.track(sent.message_id, {
-            type: "clarify",
-            snippet: result.question.slice(0, 200),
-          });
-          break;
-        }
-        case "answer": {
-          await clearConversation(chatId);
-          const sent = await ctx.reply(result.reply);
-          messageTracker.track(sent.message_id, {
-            type: "answer",
-            snippet: result.reply.slice(0, 200),
-          });
-          break;
-        }
-      }
+      await handleTriageResult(ctx, chatId, result, historyEntry);
     } catch (err) {
       console.error("Photo handler error:", err);
       const reason = conciergeErrorReason(err);
       await ctx.reply(`Couldn't process that image: ${reason}. Try /raw <prompt>.`);
+    }
+  });
+
+  bot.on("message:voice", async (ctx) => {
+    if (!isAllowed(ctx)) return;
+
+    const chatId = ctx.chat.id.toString();
+    latestCtx.set(chatId, ctx);
+
+    if (!transcriber) {
+      await ctx.reply(
+        "Voice messages aren't wired up yet — send text or use /raw."
+      );
+      return;
+    }
+
+    // Rate-limit before downloading audio or transcribing (issue #3).
+    if (!(await withinConciergeRate(ctx, chatId))) return;
+
+    const voice = ctx.message.voice;
+    // Reject oversized/overlong notes up front (issue #1 hardening) — using the
+    // Telegram metadata, before any download or transcription.
+    const limitReason = checkVoiceLimits(
+      voice.duration,
+      voice.file_size,
+      config.voiceMaxDurationS
+    );
+    if (limitReason) {
+      await ctx.reply(limitReason);
+      return;
+    }
+
+    try {
+      const audio = await downloadFile(
+        ctx.api,
+        voice.file_id,
+        voice.mime_type ?? "audio/ogg"
+      );
+      const rawTranscript = await transcriber(
+        audio.buffer,
+        audio.filename,
+        audio.mimeType
+      );
+      // Bound the transcript before it's echoed, triaged, or persisted to Munin.
+      const transcript = rawTranscript.slice(0, MAX_TRANSCRIPT_CHARS);
+
+      // Transcription is imperfect — show what was heard so a misheard task is
+      // obvious to the user. Cap the echo so a long note can't blow Telegram's
+      // 4096-char limit.
+      const heard =
+        transcript.length > 3500 ? transcript.slice(0, 3500) + "…" : transcript;
+      await ctx.reply(`Heard: "${heard}"`);
+
+      const repliedTo = ctx.message.reply_to_message;
+      const tracked = repliedTo
+        ? messageTracker.lookup(repliedTo.message_id)
+        : null;
+      const replyCtx = buildReplyContext(repliedTo, tracked);
+
+      const history = await getConversation(chatId);
+      const muninContext = await gatherContext(munin);
+      const result = await triage(transcript, history, muninContext, replyCtx);
+
+      await handleTriageResult(ctx, chatId, result, `[voice] ${transcript}`);
+    } catch (err) {
+      console.error("Voice handler error:", err);
+      const reason = conciergeErrorReason(err);
+      await ctx.reply(
+        `Couldn't process that voice message: ${reason}. Try text or /raw.`
+      );
     }
   });
 
