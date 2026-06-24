@@ -180,14 +180,16 @@ Recon found the documented plan was stale; resolved all three:
   accidental overwrite of m5's `whisper-server.service` was caught + restored.)
 
 ## Next Steps
-- **⚠️ m5 is currently DOWN** — voice transcription is non-functional until it returns
-  (Ratatoskr degrades gracefully: voice notes get "transcription failed — check the
-  voice endpoint"). When m5 is back: confirm `whisper-server.service` auto-recovered
-  tailnet-bound on `100.76.72.59:8092`, then run the live voice-note test.
-- **Live UX tests (pending):** a real Telegram voice note → `Heard: …` → concierge;
-  and a `POST /api/send` with an `alert` envelope → Telegram + Heimdall strip.
+- **✅ Voice (#1) confirmed LIVE** — m5 is back; `whisper-server.service` auto-recovered
+  tailnet-bound on `100.76.72.59:8092`, and a real Telegram voice note transcribed via
+  KB-Whisper and the bot replied (logs clean). Done.
+- **Optional live check:** exercise the alert-envelope path — `POST /api/send`
+  `{chat_id, alert}` → Telegram + Heimdall strip (infra verified 401/200, not yet run
+  with a real alert).
 - **m5 caveat:** KB-Whisper is now tailnet-bound (not loopback) — update any local-only
   m5 consumer of `127.0.0.1:8092` to `100.76.72.59:8092`, or rebind `0.0.0.0`.
 - **#1 follow-up:** document routing (PDF/txt) — separate from transcription.
+- **Separate:** Munin consolidation worker flagged `failing` (the bot alerted on Telegram)
+  — investigate in the Munin project.
 - Prior backlog: grimnir #31 (restart-after-dep-upgrade); pendingReplyContext
   per-message keying.
