@@ -36,6 +36,7 @@ Part of the Grimnir system: **Munin** (memory), **Hugin** (task dispatcher), **R
 - `src/telegram-file.ts` — Download photos from Telegram's file API
 - `src/message-tracker.ts` — In-memory tracker mapping outbound Telegram message IDs to context (for reply awareness)
 - `src/message-aggregator.ts` — Debounce rapid Telegram message fragments into single logical messages
+- `src/rate-limiter.ts` — `SlidingWindowRateLimiter`: per-key sliding-window limiter (pure, time-injectable). Caps concierge/Haiku triage calls per chat so a message burst can't fan out into unbounded API calls (issue #3)
 - `src/auth.ts` — Bearer-token middleware for `POST /api/send` (timing-safe; fail-closed when bound non-loopback without a key)
 - `src/send-handler.ts` — `POST /api/send` route: `createSendHandler` (pure, DI'd handler — validation → allowlist → send → best-effort Heimdall echo) + `registerSendRoute` (wires auth → `express.json()` → handler in order). Extracted from `index.ts` as the testable seam (tested in `tests/send-handler.test.ts`). Accepts `{chat_id, text}` and/or `{chat_id, alert}` (issue #16)
 - `src/alert.ts` — alert-bus support for `/api/send` (issue #16): `AlertEnvelope` type, `validateAlert` (rebuilds a clean allowlisted envelope from untrusted input), `renderAlertText` (severity header + body + links, self-bounded to Telegram's 4096 limit), `createHeimdallNotifier` (best-effort POST of the envelope to Heimdall's `/api/alerts` ingest)
@@ -104,6 +105,8 @@ see **`docs/remote-send.md`** (bind `HOST` to the Tailscale IP + set
 | `RATATOSKR_CONSOLIDATION_POLL_MS` | `120000` | Interval for polling Munin consolidation-worker health |
 | `HEIMDALL_INGEST_URL` | — | Heimdall `/api/alerts` ingest URL. The `/api/send` → Heimdall echo runs only when **both** this and `HEIMDALL_ALERT_TOKEN` are set; either unset → echo skipped (issue #16). |
 | `HEIMDALL_ALERT_TOKEN` | — | Bearer token for Heimdall's fail-closed alert ingest, sent on the echo. Required alongside `HEIMDALL_INGEST_URL` to enable the echo. |
+| `RATATOSKR_CONCIERGE_RATE_LIMIT` | `8` | Max concierge (Haiku) triage calls per chat per window before messages are rate-limited (issue #3). |
+| `RATATOSKR_CONCIERGE_RATE_WINDOW_MS` | `60000` | Sliding-window size for the concierge rate limit. |
 
 ## Concierge design
 

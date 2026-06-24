@@ -125,4 +125,36 @@ describe("config validation", () => {
     expect(() => validateConfig()).not.toThrow();
     expect(mockWarn).not.toHaveBeenCalled();
   });
+
+  // Concierge rate-limit config sanity (issue #3).
+  it("warns when RATATOSKR_CONCIERGE_RATE_LIMIT is non-positive", async () => {
+    setRequired();
+    process.env.RATATOSKR_CONCIERGE_RATE_LIMIT = "0";
+
+    const { validateConfig } = await import("../src/config.js");
+    expect(() => validateConfig()).not.toThrow();
+    expect(mockWarn).toHaveBeenCalledWith(
+      expect.stringContaining("RATATOSKR_CONCIERGE_RATE_LIMIT")
+    );
+  });
+
+  it("emits no rate-limit warning on the default config", async () => {
+    setRequired();
+    delete process.env.RATATOSKR_CONCIERGE_RATE_LIMIT;
+    delete process.env.RATATOSKR_CONCIERGE_RATE_WINDOW_MS;
+
+    const { validateConfig } = await import("../src/config.js");
+    expect(() => validateConfig()).not.toThrow();
+    expect(mockWarn).not.toHaveBeenCalled();
+  });
+
+  it("sanitizes an invalid rate limit/window to the safe defaults at runtime", async () => {
+    setRequired();
+    process.env.RATATOSKR_CONCIERGE_RATE_LIMIT = "0"; // would reject everything
+    process.env.RATATOSKR_CONCIERGE_RATE_WINDOW_MS = "notanumber"; // NaN → no limit
+
+    const { config } = await import("../src/config.js");
+    expect(config.conciergeRateLimit).toBe(8);
+    expect(config.conciergeRateWindowMs).toBe(60000);
+  });
 });

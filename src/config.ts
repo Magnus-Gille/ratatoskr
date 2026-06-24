@@ -1,3 +1,17 @@
+/** Parse an env var as a positive integer, falling back to `fallback` if it is
+ *  missing, non-numeric, or ≤ 0. Keeps the runtime safe from a mistyped value. */
+function positiveIntEnv(raw: string | undefined, fallback: number): number {
+  const n = parseInt(raw ?? "", 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+/** True when the env var was set to a value that is NOT a positive integer. */
+function isInvalidPositiveInt(raw: string | undefined): boolean {
+  if (raw === undefined || raw === "") return false; // unset → use default, fine
+  const n = parseInt(raw, 10);
+  return !Number.isFinite(n) || n <= 0;
+}
+
 export const config = {
   port: parseInt(process.env.PORT || "3034"),
   host: process.env.HOST || "127.0.0.1",
@@ -24,6 +38,18 @@ export const config = {
   // POST /api/send → Heimdall echo is skipped; the Telegram send is unaffected.
   heimdallIngestUrl: process.env.HEIMDALL_INGEST_URL || "",
   heimdallAlertToken: process.env.HEIMDALL_ALERT_TOKEN || "",
+  // Per-user concierge (Haiku) rate limit (issue #3): at most N triage calls per
+  // window per chat, so a burst of messages can't fan out into unbounded API calls.
+  // Sanitized to positive ints so a mistyped env can't disable the limit (NaN →
+  // allow-all) or the concierge (≤0 → reject-all); validateConfig warns on misuse.
+  conciergeRateLimit: positiveIntEnv(
+    process.env.RATATOSKR_CONCIERGE_RATE_LIMIT,
+    8
+  ),
+  conciergeRateWindowMs: positiveIntEnv(
+    process.env.RATATOSKR_CONCIERGE_RATE_WINDOW_MS,
+    60000
+  ),
 };
 
 // Mirrors LOOPBACK_HOSTS in auth.ts — kept local so config validation has no
@@ -81,6 +107,20 @@ export function validateConfig(): void {
       `⚠️  HEIMDALL_INGEST_URL is set but HEIMDALL_ALERT_TOKEN is empty — the ` +
         `/api/send → Heimdall alert echo is DISABLED until the token is set ` +
         `(Heimdall's ingest is fail-closed and would reject an unauthenticated POST).`
+    );
+  }
+
+  // Concierge rate limit (issue #3). The runtime values are already sanitized to
+  // safe positive ints (positiveIntEnv), but warn loudly when the operator set an
+  // invalid value so the silent fall-back to defaults is visible at boot.
+  if (
+    isInvalidPositiveInt(process.env.RATATOSKR_CONCIERGE_RATE_LIMIT) ||
+    isInvalidPositiveInt(process.env.RATATOSKR_CONCIERGE_RATE_WINDOW_MS)
+  ) {
+    console.warn(
+      `⚠️  RATATOSKR_CONCIERGE_RATE_LIMIT / _WINDOW_MS is invalid (expected positive ` +
+        `integers) — falling back to defaults ` +
+        `(limit=${config.conciergeRateLimit}, windowMs=${config.conciergeRateWindowMs}).`
     );
   }
 }
