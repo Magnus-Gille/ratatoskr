@@ -111,6 +111,8 @@ see **`docs/remote-send.md`** (bind `HOST` to the Tailscale IP + set
 | `RATATOSKR_TRANSCRIBE_URL` | — | Local OpenAI-compatible Whisper endpoint for voice messages (issue #1). Unset → voice messages politely declined; audio never leaves the box. |
 | `RATATOSKR_TRANSCRIBE_MODEL` | `whisper-1` | Model name sent to the transcription endpoint. |
 | `RATATOSKR_TRANSCRIBE_TOKEN` | — | Optional Bearer token if the local transcription endpoint is auth-gated. |
+| `RATATOSKR_TRANSCRIBE_ALLOW_REMOTE` | `false` | Opt-in to a non-local transcription endpoint (suppresses the "audio off-box" startup warning). |
+| `RATATOSKR_VOICE_MAX_DURATION_S` | `300` | Reject voice notes longer than this (seconds) before downloading/transcribing. |
 
 ## Concierge design
 

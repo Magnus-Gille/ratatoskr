@@ -10,7 +10,7 @@ import { SlidingWindowRateLimiter } from "./rate-limiter.js";
 import { MessageTracker } from "./message-tracker.js";
 import type { TrackedMessage } from "./message-tracker.js";
 import { downloadPhoto, downloadFile } from "./telegram-file.js";
-import { createTranscriber } from "./transcribe.js";
+import { createTranscriber, checkVoiceLimits } from "./transcribe.js";
 
 /**
  * Build the one-time "picked up" ack callback for a task. Replies on the same
@@ -64,6 +64,9 @@ interface ConversationState {
 
 const CONVERSATION_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_HISTORY = 5;
+// Upper bound on a voice transcript before it's echoed / triaged / persisted, so
+// a long note can't bloat the concierge prompt or Munin conversation state.
+const MAX_TRANSCRIPT_CHARS = 8000;
 const CONVERSATION_NAMESPACE = "ratatoskr/conversations";
 
 function formatDuration(seconds: number): string {
@@ -74,6 +77,9 @@ function formatDuration(seconds: number): string {
 
 function conciergeErrorReason(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
+  // Transcription errors must classify before the generic JSON branch, else an
+  // invalid-JSON transcription response reads as "Haiku returned gibberish".
+  if (/transcri/i.test(msg)) return "transcription failed — check the voice endpoint";
   if (/rate.?limit|429/i.test(msg)) return "API rate limit, wait a moment";
   if (/timeout|ETIMEDOUT|ECONNABORTED/i.test(msg)) return "API timed out";
   if (/ECONNREFUSED|ENOTFOUND|fetch failed/i.test(msg)) return "can't reach API";
@@ -573,22 +579,36 @@ Or just send a message and the concierge will triage it.`
     // Rate-limit before downloading audio or transcribing (issue #3).
     if (!(await withinConciergeRate(ctx, chatId))) return;
 
+    const voice = ctx.message.voice;
+    // Reject oversized/overlong notes up front (issue #1 hardening) — using the
+    // Telegram metadata, before any download or transcription.
+    const limitReason = checkVoiceLimits(
+      voice.duration,
+      voice.file_size,
+      config.voiceMaxDurationS
+    );
+    if (limitReason) {
+      await ctx.reply(limitReason);
+      return;
+    }
+
     try {
-      const voice = ctx.message.voice;
       const audio = await downloadFile(
         ctx.api,
         voice.file_id,
         voice.mime_type ?? "audio/ogg"
       );
-      const transcript = await transcriber(
+      const rawTranscript = await transcriber(
         audio.buffer,
         audio.filename,
         audio.mimeType
       );
+      // Bound the transcript before it's echoed, triaged, or persisted to Munin.
+      const transcript = rawTranscript.slice(0, MAX_TRANSCRIPT_CHARS);
 
       // Transcription is imperfect — show what was heard so a misheard task is
       // obvious to the user. Cap the echo so a long note can't blow Telegram's
-      // 4096-char limit (the full transcript still goes to the concierge).
+      // 4096-char limit.
       const heard =
         transcript.length > 3500 ? transcript.slice(0, 3500) + "…" : transcript;
       await ctx.reply(`Heard: "${heard}"`);

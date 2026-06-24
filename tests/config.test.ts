@@ -157,4 +157,56 @@ describe("config validation", () => {
     expect(config.conciergeRateLimit).toBe(8);
     expect(config.conciergeRateWindowMs).toBe(60000);
   });
+
+  // Voice transcription privacy posture (issue #1).
+  it("warns when RATATOSKR_TRANSCRIBE_URL is a non-local endpoint", async () => {
+    setRequired();
+    process.env.RATATOSKR_TRANSCRIBE_URL = "https://api.openai.com/v1/audio/transcriptions";
+    delete process.env.RATATOSKR_TRANSCRIBE_ALLOW_REMOTE;
+
+    const { validateConfig } = await import("../src/config.js");
+    expect(() => validateConfig()).not.toThrow();
+    expect(mockWarn).toHaveBeenCalledWith(expect.stringContaining("OFF-BOX"));
+  });
+
+  it("does not warn for a local transcription endpoint", async () => {
+    setRequired();
+    process.env.RATATOSKR_TRANSCRIBE_URL = "http://m5:8080/v1/audio/transcriptions";
+
+    const { validateConfig } = await import("../src/config.js");
+    expect(() => validateConfig()).not.toThrow();
+    expect(mockWarn).not.toHaveBeenCalled();
+  });
+
+  it("does not warn for a remote endpoint when ALLOW_REMOTE is set", async () => {
+    setRequired();
+    process.env.RATATOSKR_TRANSCRIBE_URL = "https://api.openai.com/v1/audio/transcriptions";
+    process.env.RATATOSKR_TRANSCRIBE_ALLOW_REMOTE = "true";
+
+    const { validateConfig } = await import("../src/config.js");
+    expect(() => validateConfig()).not.toThrow();
+    expect(mockWarn).not.toHaveBeenCalled();
+  });
+});
+
+describe("isLocalHost", () => {
+  it("treats loopback, bare hostnames, .local, and private/Tailscale IPs as local", async () => {
+    const { isLocalHost } = await import("../src/config.js");
+    expect(isLocalHost("http://localhost:8080/x")).toBe(true);
+    expect(isLocalHost("http://127.0.0.1/x")).toBe(true);
+    expect(isLocalHost("http://m5:8080/x")).toBe(true); // bare hostname
+    expect(isLocalHost("http://huginmunin.local/x")).toBe(true);
+    expect(isLocalHost("http://10.0.0.5/x")).toBe(true);
+    expect(isLocalHost("http://192.168.1.4/x")).toBe(true);
+    expect(isLocalHost("http://172.16.0.9/x")).toBe(true);
+    expect(isLocalHost("http://100.97.117.37/x")).toBe(true); // Tailscale CGNAT
+  });
+
+  it("treats public hosts/IPs as non-local", async () => {
+    const { isLocalHost } = await import("../src/config.js");
+    expect(isLocalHost("https://api.openai.com/v1")).toBe(false);
+    expect(isLocalHost("http://8.8.8.8/x")).toBe(false);
+    expect(isLocalHost("http://172.32.0.1/x")).toBe(false); // just outside 172.16/12
+    expect(isLocalHost("not a url")).toBe(false);
+  });
 });

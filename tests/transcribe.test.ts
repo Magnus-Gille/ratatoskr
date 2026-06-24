@@ -1,5 +1,29 @@
 import { describe, it, expect, vi } from "vitest";
-import { createTranscriber } from "../src/transcribe.js";
+import {
+  createTranscriber,
+  checkVoiceLimits,
+  MAX_VOICE_BYTES,
+} from "../src/transcribe.js";
+
+describe("checkVoiceLimits", () => {
+  it("accepts a note within duration and size limits", () => {
+    expect(checkVoiceLimits(30, 100_000, 300)).toBeNull();
+  });
+
+  it("rejects a note longer than the max duration", () => {
+    const reason = checkVoiceLimits(600, 100, 300);
+    expect(reason).toMatch(/too long/i);
+  });
+
+  it("rejects a note larger than the max bytes", () => {
+    const reason = checkVoiceLimits(10, MAX_VOICE_BYTES + 1, 300);
+    expect(reason).toMatch(/too large/i);
+  });
+
+  it("tolerates absent metadata (duration/size undefined → accepted)", () => {
+    expect(checkVoiceLimits(undefined, undefined, 300)).toBeNull();
+  });
+});
 
 function okJson(body: unknown) {
   return {
@@ -80,6 +104,23 @@ describe("createTranscriber", () => {
       fetchImpl: vi.fn().mockResolvedValue(okJson({})) as unknown as typeof fetch,
     });
     await expect(absent(audio, "a.oga", "audio/ogg")).rejects.toThrow(/empty/i);
+  });
+
+  it("throws a transcription-specific error on invalid JSON", async () => {
+    const transcribe = createTranscriber({
+      url: "http://h/t",
+      model: "m",
+      fetchImpl: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => {
+          throw new SyntaxError("Unexpected token < in JSON");
+        },
+      } as unknown as Response) as unknown as typeof fetch,
+    });
+    await expect(transcribe(audio, "a.oga", "audio/ogg")).rejects.toThrow(
+      /transcription endpoint returned invalid json/i
+    );
   });
 
   it("propagates a network/timeout rejection", async () => {

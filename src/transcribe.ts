@@ -8,6 +8,29 @@
  * tells the user voice isn't wired up rather than failing (see bot.ts).
  */
 
+/** Hard ceiling on a voice file we'll download/transcribe (Whisper's own limit). */
+export const MAX_VOICE_BYTES = 25 * 1024 * 1024;
+
+/**
+ * Decide whether a voice note is within limits BEFORE downloading it. Returns a
+ * user-facing rejection reason, or null if acceptable. Pure — uses only the
+ * Telegram metadata (duration seconds, file_size bytes) available up front.
+ */
+export function checkVoiceLimits(
+  durationS: number | undefined,
+  fileSizeBytes: number | undefined,
+  maxDurationS: number,
+  maxBytes: number = MAX_VOICE_BYTES
+): string | null {
+  if (typeof durationS === "number" && durationS > maxDurationS) {
+    return `That voice note is too long (${durationS}s, max ${maxDurationS}s). Send a shorter one or use text.`;
+  }
+  if (typeof fileSizeBytes === "number" && fileSizeBytes > maxBytes) {
+    return `That voice note is too large to transcribe. Send a shorter one or use text.`;
+  }
+  return null;
+}
+
 export interface TranscriberOptions {
   /** OpenAI-compatible transcription endpoint, e.g. http://m5:8080/v1/audio/transcriptions */
   url: string;
@@ -56,7 +79,12 @@ export function createTranscriber(
       throw new Error(`Transcription endpoint returned ${res.status}`);
     }
 
-    const data = (await res.json()) as { text?: unknown };
+    let data: { text?: unknown };
+    try {
+      data = (await res.json()) as { text?: unknown };
+    } catch {
+      throw new Error("Transcription endpoint returned invalid JSON");
+    }
     const text = typeof data.text === "string" ? data.text.trim() : "";
     if (!text) {
       throw new Error("Transcription returned empty text");
