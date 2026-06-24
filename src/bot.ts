@@ -6,6 +6,7 @@ import { gatherContext, triage, summarizeResult } from "./concierge.js";
 import { submitTask } from "./task-writer.js";
 import { formatResultWithSummary } from "./telegram-util.js";
 import { MessageAggregator } from "./message-aggregator.js";
+import { SlidingWindowRateLimiter } from "./rate-limiter.js";
 import { MessageTracker } from "./message-tracker.js";
 import type { TrackedMessage } from "./message-tracker.js";
 import { downloadPhoto } from "./telegram-file.js";
@@ -134,6 +135,38 @@ export function createBot(
   const conversations = new Map<string, ConversationState>();
   const messageTracker = new MessageTracker();
   const pendingReplyContext = new Map<string, TrackedMessage>();
+
+  // Per-user concierge rate limit (issue #3): cap Haiku triage calls per chat so
+  // a message burst can't fan out into unbounded API calls. A second 1-per-window
+  // limiter throttles the "slow down" notice so we don't spam it on every reject.
+  const conciergeLimiter = new SlidingWindowRateLimiter(
+    config.conciergeRateLimit,
+    config.conciergeRateWindowMs
+  );
+  const rateLimitNotice = new SlidingWindowRateLimiter(
+    1,
+    config.conciergeRateWindowMs
+  );
+
+  /**
+   * Gate a concierge (triage) call by the per-user rate limit. Returns true when
+   * allowed; when over the limit, replies a throttled "slow down" notice (at most
+   * once per window) and returns false so the caller skips the triage.
+   */
+  async function withinConciergeRate(
+    ctx: Context,
+    chatId: string
+  ): Promise<boolean> {
+    if (conciergeLimiter.tryAcquire(chatId)) return true;
+    if (rateLimitNotice.tryAcquire(chatId)) {
+      try {
+        await ctx.reply("Too many at once — give me a sec, then resend.");
+      } catch (err) {
+        console.error(`Failed to send rate-limit notice to ${chatId}:`, err);
+      }
+    }
+    return false;
+  }
 
   function isAllowed(ctx: Context): boolean {
     const userId = ctx.from?.id?.toString();
@@ -383,6 +416,7 @@ Or just send a message and the concierge will triage it.`
 
       (async () => {
         try {
+          if (!(await withinConciergeRate(ctx, chatId))) return;
           const history = await getConversation(chatId);
           const muninContext = await gatherContext(munin);
           const replyCtx = pendingReplyContext.get(chatId) ?? null;
@@ -461,6 +495,9 @@ Or just send a message and the concierge will triage it.`
 
     const chatId = ctx.chat.id.toString();
     latestCtx.set(chatId, ctx);
+
+    // Rate-limit before downloading the photo or calling Haiku (issue #3).
+    if (!(await withinConciergeRate(ctx, chatId))) return;
 
     // Get the largest photo (last in array = highest resolution)
     const photos = ctx.message.photo;

@@ -24,6 +24,14 @@ export const config = {
   // POST /api/send → Heimdall echo is skipped; the Telegram send is unaffected.
   heimdallIngestUrl: process.env.HEIMDALL_INGEST_URL || "",
   heimdallAlertToken: process.env.HEIMDALL_ALERT_TOKEN || "",
+  // Per-user concierge (Haiku) rate limit (issue #3): at most N triage calls per
+  // window per chat, so a burst of messages can't fan out into unbounded API calls.
+  conciergeRateLimit: parseInt(
+    process.env.RATATOSKR_CONCIERGE_RATE_LIMIT || "8"
+  ),
+  conciergeRateWindowMs: parseInt(
+    process.env.RATATOSKR_CONCIERGE_RATE_WINDOW_MS || "60000"
+  ),
 };
 
 // Mirrors LOOPBACK_HOSTS in auth.ts — kept local so config validation has no
@@ -81,6 +89,22 @@ export function validateConfig(): void {
       `⚠️  HEIMDALL_INGEST_URL is set but HEIMDALL_ALERT_TOKEN is empty — the ` +
         `/api/send → Heimdall alert echo is DISABLED until the token is set ` +
         `(Heimdall's ingest is fail-closed and would reject an unauthenticated POST).`
+    );
+  }
+
+  // Concierge rate limit (issue #3). A non-positive / non-numeric limit or window
+  // would make the limiter reject every message (limit ≤ 0) or never limit at all
+  // (NaN) — both are footguns, so flag a misconfig loudly (non-fatal).
+  if (
+    !Number.isFinite(config.conciergeRateLimit) ||
+    config.conciergeRateLimit <= 0 ||
+    !Number.isFinite(config.conciergeRateWindowMs) ||
+    config.conciergeRateWindowMs <= 0
+  ) {
+    console.warn(
+      `⚠️  RATATOSKR_CONCIERGE_RATE_LIMIT / _WINDOW_MS is misconfigured ` +
+        `(limit=${config.conciergeRateLimit}, windowMs=${config.conciergeRateWindowMs}) — ` +
+        `expected positive integers. The concierge rate limit may not behave as intended.`
     );
   }
 }
