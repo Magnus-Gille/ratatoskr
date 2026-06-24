@@ -3,11 +3,24 @@
 **Last session:** 2026-06-24
 **Branch:** main
 
-## Completed This Session (2026-06-24) — autonomous, 3 PRs merged
+## Completed This Session (2026-06-24) — autonomous, 4 PRs merged + deployed
 
-All three landed test-first (red→green), each with a 4-lens adversarial review
-and a cross-model Codex review (gpt-5.5, xhigh) whose findings were fixed before
-merge. Suite grew 163 → 223, tsc clean throughout. **Not yet deployed to the Pi.**
+All four landed test-first (red→green), each with a cross-model Codex review
+(gpt-5.5, xhigh) whose findings were fixed before merge (#16 also got a 4-lens
+adversarial workflow review). Suite grew **163 → 238**, tsc clean throughout.
+**Deployed to huginmunin** — `/health` 200, `bot_connected:true`, clean bind.
+Voice (#1) + the Heimdall echo (#16) are live but dormant until their env vars
+are provisioned.
+
+### #1 Voice messages via a local Whisper endpoint (PR #21, merged `9e2b964`)
+New `src/transcribe.ts` (`createTranscriber` → OpenAI-compatible
+`/v1/audio/transcriptions`; `checkVoiceLimits` pure guard) + `downloadFile` in
+telegram-file. `message:voice` handler: config-gated → rate-limited → duration/
+size-guarded → download → transcribe → echo (capped) → triage. Refactor: the
+duplicated triage-result switch in the text + photo paths was extracted into a
+shared `handleTriageResult` (Codex confirmed behavior-preserving). Privacy: warns
+if `RATATOSKR_TRANSCRIBE_URL` isn't local unless `…_ALLOW_REMOTE=true`. Audio
+stays on-box. **Document routing (PDF/txt) remains a follow-up.**
 
 ### #16 Alert bus on POST /api/send (PR #17, merged `f713479`)
 `/api/send` now accepts an optional standard `alert` envelope: renders a Telegram
@@ -153,18 +166,17 @@ secret deployed on both sides.
 ## In Progress
 - Nothing — all changes merged and deployed.
 
-## Next Steps (need a decision / ops action — surfaced to Magnus 2026-06-24)
-- **Deploy #16 / #2 / #3 to the Pi** (`./scripts/deploy-pi.sh huginmunin.local`).
-  All three are merged to main but dormant until deployed — outward-facing prod
-  action on the live bot, so not auto-deployed.
-- **Provision the Heimdall echo** (so #16 actually echoes): set `HEIMDALL_INGEST_URL`
-  (e.g. `http://huginmunin:3033/api/alerts`) + `HEIMDALL_ALERT_TOKEN` on the Pi —
-  the token must match Heimdall's `HEIMDALL_ALERT_TOKEN` (cross-service).
+## Next Steps (provisioning — deferred to a focused ops session per Magnus, 2026-06-24)
+- **Provision a local Whisper endpoint for voice (#1):** stand up an
+  OpenAI-compatible `/v1/audio/transcriptions` server on the m5/on-box, then set
+  `RATATOSKR_TRANSCRIBE_URL` (+ optional `_TOKEN`) on the Pi. Until then voice
+  notes get a polite "not wired up yet" reply.
+- **Provision the Heimdall echo (#16):** set `HEIMDALL_INGEST_URL`
+  (e.g. `http://huginmunin:3033/api/alerts`) + `HEIMDALL_ALERT_TOKEN` (must match
+  Heimdall's token) on the Pi.
 - **Deploy the signing secret** (PR #5, still dormant): `RATATOSKR_SIGNING_SECRET`
   (64-char hex) on the Pi + matching `HUGIN_SUBMITTER_KEYS` `{"ratatoskr":"<hex>"}`
   on Hugin, then flip `HUGIN_SIGNING_POLICY=warn`. Cross-repo + prod secret.
-- **#1 Non-text messages** — voice transcription + document routing (photos already
-  work). Needs a transcription-backend decision (Whisper API vs local/m5 vs other)
-  before implementing.
+- **#1 follow-up:** document routing (PDF/txt) — separate from transcription.
 - Prior backlog: grimnir #31 (restart-after-dep-upgrade); pendingReplyContext
   per-message keying.
