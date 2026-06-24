@@ -147,4 +147,14 @@ describe("config validation", () => {
     expect(() => validateConfig()).not.toThrow();
     expect(mockWarn).not.toHaveBeenCalled();
   });
+
+  it("sanitizes an invalid rate limit/window to the safe defaults at runtime", async () => {
+    setRequired();
+    process.env.RATATOSKR_CONCIERGE_RATE_LIMIT = "0"; // would reject everything
+    process.env.RATATOSKR_CONCIERGE_RATE_WINDOW_MS = "notanumber"; // NaN → no limit
+
+    const { config } = await import("../src/config.js");
+    expect(config.conciergeRateLimit).toBe(8);
+    expect(config.conciergeRateWindowMs).toBe(60000);
+  });
 });

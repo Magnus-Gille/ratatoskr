@@ -416,11 +416,14 @@ Or just send a message and the concierge will triage it.`
 
       (async () => {
         try {
+          // Consume the pending reply context up front so a rate-limited (or
+          // failed) turn discards its own context instead of leaking it onto the
+          // next, unrelated message.
+          const replyCtx = pendingReplyContext.get(chatId) ?? null;
+          pendingReplyContext.delete(chatId);
           if (!(await withinConciergeRate(ctx, chatId))) return;
           const history = await getConversation(chatId);
           const muninContext = await gatherContext(munin);
-          const replyCtx = pendingReplyContext.get(chatId) ?? null;
-          pendingReplyContext.delete(chatId);
           const result = await triage(message, history, muninContext, replyCtx);
 
           switch (result.action) {
