@@ -145,6 +145,7 @@ export async function formatResultWithSummary(
  */
 export const STATUS_MESSAGES = {
   cancelled: (taskId: string) => `Cancelled ${shortId(taskId)}.`,
+  pickedUp: (taskId: string) => `On it — ${shortId(taskId)} picked up.`,
   pollTimeout: (taskId: string, minutes: number) =>
     `Lost track of ${shortId(taskId)} after ${minutes} min. Check Munin.`,
   completedFallback: "Done.",

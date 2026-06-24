@@ -39,6 +39,20 @@ function makeDeliveryCallback(
   };
 }
 
+function makePickupCallback(
+  botApi: Api,
+  taskId: string,
+  chatId: number
+): (message: string) => Promise<void> {
+  return async (message: string) => {
+    try {
+      await botApi.sendMessage(chatId, message);
+    } catch (err) {
+      console.error(`Failed to deliver recovered pickup ack for ${taskId}:`, err);
+    }
+  };
+}
+
 export async function recoverActivePolls(
   munin: MuninClient,
   poller: ResultPoller,
@@ -77,7 +91,8 @@ export async function recoverActivePolls(
     const taskId = task.namespace.replace(/^tasks\//, "");
     poller.startPolling(
       taskId,
-      makeDeliveryCallback(botApi, taskId, meta.chatId)
+      makeDeliveryCallback(botApi, taskId, meta.chatId),
+      makePickupCallback(botApi, taskId, meta.chatId)
     );
     recovered++;
   }

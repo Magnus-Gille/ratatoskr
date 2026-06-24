@@ -11,6 +11,24 @@ import type { TrackedMessage } from "./message-tracker.js";
 import { downloadPhoto } from "./telegram-file.js";
 
 /**
+ * Build the one-time "picked up" ack callback for a task. Replies on the same
+ * chat as the originating context; a send failure here is non-fatal (the result
+ * delivery is the important message). See ResultPoller.startPolling onPickup.
+ */
+function makePickupAck(
+  ctx: Context,
+  taskId: string
+): (message: string) => Promise<void> {
+  return async (message: string) => {
+    try {
+      await ctx.reply(message);
+    } catch (err) {
+      console.error(`Failed to deliver pickup ack for ${taskId}:`, err);
+    }
+  };
+}
+
+/**
  * Build a reply context object from Telegram's reply_to_message and the
  * in-memory tracker result (either of which may be absent).
  *
@@ -273,19 +291,23 @@ Or just send a message and the concierge will triage it.`
       );
       const ackRaw = await ctx.reply(`Submitted to scratch. Task: ${taskId}`);
       messageTracker.track(ackRaw.message_id, { type: "ack", taskId });
-      poller.startPolling(taskId, async (result) => {
-        try {
-          const resultText = await formatResultWithSummary(result, taskId, summarizeResult);
-          const sent = await ctx.reply(resultText);
-          messageTracker.track(sent.message_id, {
-            type: "result",
-            taskId,
-            snippet: resultText.slice(0, 200),
-          });
-        } catch (err) {
-          console.error(`Failed to deliver result for ${taskId}:`, err);
-        }
-      });
+      poller.startPolling(
+        taskId,
+        async (result) => {
+          try {
+            const resultText = await formatResultWithSummary(result, taskId, summarizeResult);
+            const sent = await ctx.reply(resultText);
+            messageTracker.track(sent.message_id, {
+              type: "result",
+              taskId,
+              snippet: resultText.slice(0, 200),
+            });
+          } catch (err) {
+            console.error(`Failed to deliver result for ${taskId}:`, err);
+          }
+        },
+        makePickupAck(ctx, taskId)
+      );
     } catch (err) {
       console.error("Raw command error:", err);
       await ctx.reply("Error submitting task. Check logs.");
@@ -323,19 +345,23 @@ Or just send a message and the concierge will triage it.`
       );
       const ackRepo = await ctx.reply(`Submitted to repo:${repoName}. Task: ${taskId}`);
       messageTracker.track(ackRepo.message_id, { type: "ack", taskId });
-      poller.startPolling(taskId, async (result) => {
-        try {
-          const resultText = await formatResultWithSummary(result, taskId, summarizeResult);
-          const sent = await ctx.reply(resultText);
-          messageTracker.track(sent.message_id, {
-            type: "result",
-            taskId,
-            snippet: resultText.slice(0, 200),
-          });
-        } catch (err) {
-          console.error(`Failed to deliver result for ${taskId}:`, err);
-        }
-      });
+      poller.startPolling(
+        taskId,
+        async (result) => {
+          try {
+            const resultText = await formatResultWithSummary(result, taskId, summarizeResult);
+            const sent = await ctx.reply(resultText);
+            messageTracker.track(sent.message_id, {
+              type: "result",
+              taskId,
+              snippet: resultText.slice(0, 200),
+            });
+          } catch (err) {
+            console.error(`Failed to deliver result for ${taskId}:`, err);
+          }
+        },
+        makePickupAck(ctx, taskId)
+      );
     } catch (err) {
       console.error("Repo command error:", err);
       await ctx.reply("Error submitting task. Check logs.");
@@ -383,22 +409,26 @@ Or just send a message and the concierge will triage it.`
               const ackText = `Got it, submitting to ${result.task.context}. ~${duration}.`;
               const ackSent = await ctx.reply(ackText);
               messageTracker.track(ackSent.message_id, { type: "ack", taskId });
-              poller.startPolling(taskId, async (pollResult) => {
-                try {
-                  const resultText = await formatResultWithSummary(pollResult, taskId, summarizeResult);
-                  const sent = await ctx.reply(resultText);
-                  messageTracker.track(sent.message_id, {
-                    type: "result",
-                    taskId,
-                    snippet: resultText.slice(0, 200),
-                  });
-                } catch (err) {
-                  console.error(
-                    `Failed to deliver result for ${taskId}:`,
-                    err
-                  );
-                }
-              });
+              poller.startPolling(
+                taskId,
+                async (pollResult) => {
+                  try {
+                    const resultText = await formatResultWithSummary(pollResult, taskId, summarizeResult);
+                    const sent = await ctx.reply(resultText);
+                    messageTracker.track(sent.message_id, {
+                      type: "result",
+                      taskId,
+                      snippet: resultText.slice(0, 200),
+                    });
+                  } catch (err) {
+                    console.error(
+                      `Failed to deliver result for ${taskId}:`,
+                      err
+                    );
+                  }
+                },
+                makePickupAck(ctx, taskId)
+              );
               break;
             }
             case "clarify": {
@@ -479,18 +509,22 @@ Or just send a message and the concierge will triage it.`
             `Got it, submitting to ${result.task.context}. ~${duration}.`
           );
           messageTracker.track(sent.message_id, { type: "ack", taskId });
-          poller.startPolling(taskId, async (pollResult) => {
-            try {
-              const sent = await ctx.reply(await formatResultWithSummary(pollResult, taskId, summarizeResult));
-              messageTracker.track(sent.message_id, {
-                type: "result",
-                taskId,
-                snippet: pollResult.slice(0, 200),
-              });
-            } catch (err) {
-              console.error(`Failed to deliver result for ${taskId}:`, err);
-            }
-          });
+          poller.startPolling(
+            taskId,
+            async (pollResult) => {
+              try {
+                const sent = await ctx.reply(await formatResultWithSummary(pollResult, taskId, summarizeResult));
+                messageTracker.track(sent.message_id, {
+                  type: "result",
+                  taskId,
+                  snippet: pollResult.slice(0, 200),
+                });
+              } catch (err) {
+                console.error(`Failed to deliver result for ${taskId}:`, err);
+              }
+            },
+            makePickupAck(ctx, taskId)
+          );
           break;
         }
         case "clarify": {
