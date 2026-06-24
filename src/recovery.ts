@@ -41,15 +41,11 @@ function makeDeliveryCallback(
 
 function makePickupCallback(
   botApi: Api,
-  taskId: string,
   chatId: number
 ): (message: string) => Promise<void> {
+  // Failures propagate so the poller retries and only marks "acked" on success.
   return async (message: string) => {
-    try {
-      await botApi.sendMessage(chatId, message);
-    } catch (err) {
-      console.error(`Failed to deliver recovered pickup ack for ${taskId}:`, err);
-    }
+    await botApi.sendMessage(chatId, message);
   };
 }
 
@@ -92,7 +88,7 @@ export async function recoverActivePolls(
     poller.startPolling(
       taskId,
       makeDeliveryCallback(botApi, taskId, meta.chatId),
-      makePickupCallback(botApi, taskId, meta.chatId)
+      makePickupCallback(botApi, meta.chatId)
     );
     recovered++;
   }

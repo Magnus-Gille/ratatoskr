@@ -12,19 +12,13 @@ import { downloadPhoto } from "./telegram-file.js";
 
 /**
  * Build the one-time "picked up" ack callback for a task. Replies on the same
- * chat as the originating context; a send failure here is non-fatal (the result
- * delivery is the important message). See ResultPoller.startPolling onPickup.
+ * chat as the originating context. A send failure is allowed to propagate so the
+ * poller can retry on a later poll and only persist its "acked" marker once the
+ * ack is actually delivered (see ResultPoller.ackPickup).
  */
-function makePickupAck(
-  ctx: Context,
-  taskId: string
-): (message: string) => Promise<void> {
+function makePickupAck(ctx: Context): (message: string) => Promise<void> {
   return async (message: string) => {
-    try {
-      await ctx.reply(message);
-    } catch (err) {
-      console.error(`Failed to deliver pickup ack for ${taskId}:`, err);
-    }
+    await ctx.reply(message);
   };
 }
 
@@ -306,7 +300,7 @@ Or just send a message and the concierge will triage it.`
             console.error(`Failed to deliver result for ${taskId}:`, err);
           }
         },
-        makePickupAck(ctx, taskId)
+        makePickupAck(ctx)
       );
     } catch (err) {
       console.error("Raw command error:", err);
@@ -360,7 +354,7 @@ Or just send a message and the concierge will triage it.`
             console.error(`Failed to deliver result for ${taskId}:`, err);
           }
         },
-        makePickupAck(ctx, taskId)
+        makePickupAck(ctx)
       );
     } catch (err) {
       console.error("Repo command error:", err);
@@ -427,7 +421,7 @@ Or just send a message and the concierge will triage it.`
                     );
                   }
                 },
-                makePickupAck(ctx, taskId)
+                makePickupAck(ctx)
               );
               break;
             }
@@ -523,7 +517,7 @@ Or just send a message and the concierge will triage it.`
                 console.error(`Failed to deliver result for ${taskId}:`, err);
               }
             },
-            makePickupAck(ctx, taskId)
+            makePickupAck(ctx)
           );
           break;
         }

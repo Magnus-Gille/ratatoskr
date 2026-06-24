@@ -297,4 +297,52 @@ describe("ResultPoller", () => {
     await new Promise((r) => setTimeout(r, 250));
     expect(readFn).not.toHaveBeenCalledWith("tasks/legacy-task", "pickup");
   });
+
+  it("retries the pickup ack on failure and writes the marker only after success", async () => {
+    const writeFn = vi.fn().mockResolvedValue({});
+    let pickupCalls = 0;
+    const onPickup = vi.fn().mockImplementation(async () => {
+      pickupCalls++;
+      if (pickupCalls === 1) throw new Error("telegram down");
+      // second attempt succeeds
+    });
+    const munin = mockMunin({
+      read: vi.fn().mockImplementation(async (_ns, key) =>
+        key === "status"
+          ? { found: true, content: "running", tags: ["running"] }
+          : null // no persisted pickup marker
+      ),
+      write: writeFn,
+    });
+    poller = new ResultPoller(munin);
+    poller.startPolling("retry-task", async () => {}, onPickup);
+
+    await new Promise((r) => setTimeout(r, 350));
+    expect(onPickup.mock.calls.length).toBeGreaterThanOrEqual(2); // retried
+    const pickupWrites = writeFn.mock.calls.filter((c) => c[1] === "pickup");
+    expect(pickupWrites.length).toBe(1); // marker written once, after success
+  });
+
+  it("serializes overlapping polls so onComplete fires once despite a slow read", async () => {
+    let statusCalls = 0;
+    const onComplete = vi.fn().mockResolvedValue(undefined);
+    const munin = mockMunin({
+      read: vi.fn().mockImplementation(async (_ns, key) => {
+        if (key === "status") {
+          statusCalls++;
+          // Make the first read slower than the poll interval so the next tick
+          // overlaps it — the busy guard must skip the overlapping poll.
+          if (statusCalls === 1) await new Promise((r) => setTimeout(r, 150));
+          return { found: true, content: "done", tags: ["completed"] };
+        }
+        if (key === "result") return { found: true, content: "R", tags: [] };
+        return null;
+      }),
+    });
+    poller = new ResultPoller(munin);
+    poller.startPolling("overlap-task", onComplete);
+
+    await new Promise((r) => setTimeout(r, 300));
+    expect(onComplete).toHaveBeenCalledTimes(1);
+  });
 });

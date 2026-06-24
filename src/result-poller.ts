@@ -7,6 +7,8 @@ export class ResultPoller {
   private timeouts: Map<string, NodeJS.Timeout> = new Map();
   /** Tasks whose "picked up" ack has been handled in this process (re-entry guard). */
   private pickupAcked: Set<string> = new Set();
+  /** Tasks with a poll currently in flight — serializes overlapping interval ticks. */
+  private polling: Set<string> = new Set();
   private munin: MuninClient;
   private stopped = false;
 
@@ -24,9 +26,16 @@ export class ResultPoller {
 
     const poll = async () => {
       if (this.stopped) return;
+      // Serialize polls per task: setInterval does not await, so a slow read
+      // could let the next tick start before this one finishes — overlapping
+      // polls could double-deliver a result or fire an out-of-order pickup.
+      if (this.polling.has(taskId)) return;
+      this.polling.add(taskId);
       try {
         const entry = await this.munin.read(`tasks/${taskId}`, "status");
-        if (!entry || this.stopped) return;
+        // Bail if the task was stopped (cancel / timeout / shutdown) while the
+        // read was in flight — no side effects after a stop.
+        if (!entry || this.stopped || !this.activePolls.has(taskId)) return;
 
         const tags = entry.tags || [];
         const isTerminal =
@@ -47,7 +56,10 @@ export class ResultPoller {
             try {
               await this.ackPickup(taskId, onPickup);
             } catch (err) {
-              console.error(`Pickup ack error for ${taskId}:`, err);
+              // Delivery failed — clear the guard so a later poll retries, and
+              // leave the marker unwritten (it means "acked", not "attempted").
+              console.error(`Pickup ack failed for ${taskId}, will retry:`, err);
+              this.pickupAcked.delete(taskId);
             }
           }
           return;
@@ -88,6 +100,8 @@ export class ResultPoller {
         }
       } catch (err) {
         console.error(`Poll error for ${taskId}:`, err);
+      } finally {
+        this.polling.delete(taskId);
       }
     };
 
