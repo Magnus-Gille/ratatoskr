@@ -1,6 +1,7 @@
 import express from "express";
 import { config, validateConfig } from "./config.js";
 import { registerSendRoute } from "./send-handler.js";
+import { HEIMDALL_DESCRIPTOR } from "./descriptor.js";
 import { createHeimdallNotifier } from "./alert.js";
 import { MuninClient } from "./munin-client.js";
 import { ResultPoller } from "./result-poller.js";
@@ -33,6 +34,12 @@ app.get("/health", (_req, res) => {
     bot_connected: botConnected,
     active_polls: poller.activePollCount,
   });
+});
+
+// Heimdall self-descriptor (no auth) — Tier-1 discovery endpoint.
+// Must remain unauthenticated (same as /health), NOT behind RATATOSKR_SEND_API_KEY.
+app.get("/heimdall.json", (_req, res) => {
+  res.json(HEIMDALL_DESCRIPTOR);
 });
 
 // Best-effort Heimdall echo for alert-envelope sends (issue #16). Enabled only
