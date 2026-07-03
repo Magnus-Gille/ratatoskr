@@ -280,6 +280,64 @@ describe("concierge", () => {
       expect(lastMessage.content).toBe("hello");
     });
 
+    it("should attach triage meta (model, latency, tokens) to the result", async () => {
+      mockCreate.mockResolvedValue({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ action: "answer", reply: "Hello!" }),
+          },
+        ],
+        usage: { input_tokens: 123, output_tokens: 45 },
+      });
+
+      const result = await triage("hi", [], "No context");
+      expect(result.meta.model).toBe("claude-haiku-4-5-20251001");
+      expect(result.meta.inputTokens).toBe(123);
+      expect(result.meta.outputTokens).toBe(45);
+      expect(result.meta.latencyMs).toBeGreaterThanOrEqual(0);
+      expect(Number.isFinite(result.meta.latencyMs)).toBe(true);
+    });
+
+    it("should default token counts to 0 when the API response has no usage field", async () => {
+      mockCreate.mockResolvedValue({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ action: "answer", reply: "Hello!" }),
+          },
+        ],
+      });
+
+      const result = await triage("hi", [], "No context");
+      expect(result.meta.inputTokens).toBe(0);
+      expect(result.meta.outputTokens).toBe(0);
+    });
+
+    it("should attach meta to ready and clarify results too", async () => {
+      mockCreate.mockResolvedValue({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              action: "clarify",
+              question: "Which one?",
+            }),
+          },
+        ],
+        usage: { input_tokens: 10, output_tokens: 2 },
+      });
+
+      const result = await triage("fix the bug", [], "No context");
+      expect(result.action).toBe("clarify");
+      expect(result.meta).toEqual({
+        model: "claude-haiku-4-5-20251001",
+        latencyMs: expect.any(Number),
+        inputTokens: 10,
+        outputTokens: 2,
+      });
+    });
+
     it("should include image handling instructions in the system prompt", async () => {
       mockCreate.mockResolvedValue({
         content: [

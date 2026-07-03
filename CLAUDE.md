@@ -25,13 +25,15 @@ Part of the Grimnir system: **Munin** (memory), **Hugin** (task dispatcher), **R
 ### Components
 
 - `src/index.ts` — Express app (health endpoint + registers `/api/send` route) + bot startup + poll recovery
-- `src/bot.ts` — Telegram bot setup, message/photo/voice handlers, allowlist, conversation persistence; shared `handleTriageResult` drives submit/clarify/answer for all input types
-- `src/concierge.ts` — Intent triage via Claude Haiku API (multimodal: text + images), result summarization
+- `src/bot.ts` — Telegram bot setup, message/photo/voice handlers, allowlist, conversation persistence; shared `handleTriageResult` drives submit/clarify/answer for all input types, and fire-and-forget logs each triage decision to Munin (`ratatoskr/triage`) + records it in `TriageStats` (issue #27)
+- `src/concierge.ts` — Intent triage via Claude Haiku API (multimodal: text + images), result summarization; `triage()` returns a `meta` field (model, latency, input/output tokens) alongside the action (issue #27)
+- `src/triage-stats.ts` — `TriageStats`: in-memory (process-lifetime) tally of triage decisions by action + avg latency/tokens, read by `/heimdall.json` for real competence metrics (issue #27)
 - `src/soul.ts` — `RATATOSKR_SOUL` constant defining Ratatoskr's voice/personality for all Telegram output
 - `src/task-writer.ts` — Format task markdown, write to Munin (with instance tag)
 - `src/result-poller.ts` — Poll Munin for task results, delivery confirmation; fires a one-time "picked up" ack on the first `running` transition (issue #2), de-duped via a persisted Munin marker so a restart doesn't re-announce
 - `src/recovery.ts` — Startup recovery: reattach polls, deliver undelivered results
 - `src/munin-client.ts` — HTTP client for Munin JSON-RPC API
+- `src/descriptor.ts` — `buildHeimdallDescriptor(state)`: builds the `/heimdall.json` body with `status`/`metrics` computed from live state (bot connection, active polls, triage stats) rather than hardcoded (issue #27)
 - `src/telegram-util.ts` — Result formatting: metadata extraction, markdown stripping, summarization pipeline, truncation
 - `src/telegram-file.ts` — Download media from Telegram's file API: `downloadPhoto` (base64 image) + `downloadFile` (raw bytes for voice/audio, issue #1)
 - `src/transcribe.ts` — `createTranscriber`: posts audio to a local OpenAI-compatible `/v1/audio/transcriptions` Whisper endpoint (config-gated, audio stays on-box) and returns the transcript (issue #1)

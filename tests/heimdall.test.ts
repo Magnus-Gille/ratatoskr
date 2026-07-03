@@ -6,6 +6,8 @@
  *   2. Route is NOT affected by the /api/send auth gate (401 for bad key).
  *   3. Descriptor body passes the shape contract expected by
  *      Heimdall's validateDescriptor (schema/service/v1).
+ *   4. status and metrics are computed from real live state (issue #27) —
+ *      not the hardcoded status:'pass' / metrics:[] this replaces.
  *
  * We do NOT cross-require heimdall — the validator is replicated from
  * heimdall/src/contract/schema.js (the minimal subset that can hard-fail).
@@ -15,7 +17,8 @@ import { describe, it, expect } from "vitest";
 import express from "express";
 import request from "supertest";
 import { registerSendRoute } from "../src/send-handler.js";
-import { HEIMDALL_DESCRIPTOR } from "../src/descriptor.js";
+import { buildHeimdallDescriptor } from "../src/descriptor.js";
+import type { DescriptorState } from "../src/descriptor.js";
 
 // ---------------------------------------------------------------------------
 // Inline subset of heimdall validateDescriptor (schema/service/v1)
@@ -103,11 +106,35 @@ function validateDescriptor(obj: unknown): ValidateResult {
 }
 
 // ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+const HEALTHY_STATE: DescriptorState = {
+  botConnected: true,
+  activePolls: 2,
+  triage: {
+    total: 7,
+    byAction: { ready: 3, clarify: 1, answer: 3 },
+    avgLatencyMs: 842,
+    avgInputTokens: 310,
+    avgOutputTokens: 64,
+  },
+};
+
+const DOWN_STATE: DescriptorState = {
+  botConnected: false,
+  activePolls: 0,
+  triage: { total: 0, byAction: { ready: 0, clarify: 0, answer: 0 }, avgLatencyMs: 0, avgInputTokens: 0, avgOutputTokens: 0 },
+};
+
+// ---------------------------------------------------------------------------
 // Minimal app factory — mirrors how src/index.ts builds the app, without
 // importing index.ts directly (which runs validateConfig() at module level).
 // ---------------------------------------------------------------------------
 
-function makeApp(opts: { sendApiKey?: string; host?: string } = {}) {
+function makeApp(
+  opts: { sendApiKey?: string; host?: string; state?: DescriptorState } = {}
+) {
   const app = express();
 
   // Unauthenticated routes (same order as index.ts)
@@ -116,7 +143,7 @@ function makeApp(opts: { sendApiKey?: string; host?: string } = {}) {
   });
 
   app.get("/heimdall.json", (_req, res) => {
-    res.json(HEIMDALL_DESCRIPTOR);
+    res.json(buildHeimdallDescriptor(opts.state ?? HEALTHY_STATE));
   });
 
   // Authenticated route — mirrors registerSendRoute from index.ts
@@ -148,51 +175,115 @@ describe("GET /heimdall.json", () => {
   });
 
   it("body passes the schema/service/v1 contract with 0 errors", () => {
-    const result = validateDescriptor(HEIMDALL_DESCRIPTOR);
+    const result = validateDescriptor(buildHeimdallDescriptor(HEALTHY_STATE));
     expect(result.errors).toEqual([]);
     expect(result.ok).toBe(true);
   });
 
   it("descriptor has _schema ending in /service/v1", () => {
-    expect(HEIMDALL_DESCRIPTOR._schema).toContain("/service/v1");
-  });
-
-  it("descriptor service.name is 'ratatoskr'", () => {
-    expect(HEIMDALL_DESCRIPTOR.service.name).toBe("ratatoskr");
-  });
-
-  it("descriptor kind is a valid archetype", () => {
-    expect(ARCHETYPES).toContain(HEIMDALL_DESCRIPTOR.kind as string);
-  });
-
-  it("descriptor kind is http-service", () => {
-    expect(HEIMDALL_DESCRIPTOR.kind).toBe("http-service");
-  });
-
-  it("descriptor deploy.host matches instance_id", () => {
-    expect(HEIMDALL_DESCRIPTOR.deploy.host).toBe(
-      HEIMDALL_DESCRIPTOR.service.instance_id
+    expect(buildHeimdallDescriptor(HEALTHY_STATE)._schema).toContain(
+      "/service/v1"
     );
   });
 
+  it("descriptor service.name is 'ratatoskr'", () => {
+    expect(buildHeimdallDescriptor(HEALTHY_STATE).service.name).toBe(
+      "ratatoskr"
+    );
+  });
+
+  it("descriptor kind is a valid archetype", () => {
+    expect(ARCHETYPES).toContain(
+      buildHeimdallDescriptor(HEALTHY_STATE).kind as string
+    );
+  });
+
+  it("descriptor kind is http-service", () => {
+    expect(buildHeimdallDescriptor(HEALTHY_STATE).kind).toBe("http-service");
+  });
+
+  it("descriptor deploy.host matches instance_id", () => {
+    const d = buildHeimdallDescriptor(HEALTHY_STATE);
+    expect(d.deploy.host).toBe(d.service.instance_id);
+  });
+
   it("all links pass isSafeHref (no protocol-relative or JS URLs)", () => {
-    for (const [key, val] of Object.entries(HEIMDALL_DESCRIPTOR.links)) {
-      expect(isSafeHref(val), `link "${key}" must pass isSafeHref`).toBe(true);
+    for (const [key, val] of Object.entries(
+      buildHeimdallDescriptor(HEALTHY_STATE).links
+    )) {
+      expect(isSafeHref(val), `link "${key}" must pass isSafeHref`).toBe(
+        true
+      );
     }
   });
 
   it("links.self is root-relative /heimdall.json", () => {
-    expect(HEIMDALL_DESCRIPTOR.links.self).toBe("/heimdall.json");
+    expect(buildHeimdallDescriptor(HEALTHY_STATE).links.self).toBe(
+      "/heimdall.json"
+    );
   });
 
   it("links.repo is an absolute https URL", () => {
-    expect(HEIMDALL_DESCRIPTOR.links.repo).toMatch(/^https:\/\//);
+    expect(buildHeimdallDescriptor(HEALTHY_STATE).links.repo).toMatch(
+      /^https:\/\//
+    );
   });
 
-  it("response body matches HEIMDALL_DESCRIPTOR exactly", async () => {
+  it("response body matches buildHeimdallDescriptor(state) exactly", async () => {
     const app = makeApp();
     const res = await request(app).get("/heimdall.json");
-    expect(res.body).toEqual(HEIMDALL_DESCRIPTOR);
+    expect(res.body).toEqual(buildHeimdallDescriptor(HEALTHY_STATE));
+  });
+});
+
+describe("GET /heimdall.json — real status and metrics (issue #27)", () => {
+  it("status is 'pass' when the bot is connected", () => {
+    expect(buildHeimdallDescriptor(HEALTHY_STATE).status).toBe("pass");
+  });
+
+  it("status is 'fail' when the bot is disconnected — not hardcoded 'pass'", () => {
+    expect(buildHeimdallDescriptor(DOWN_STATE).status).toBe("fail");
+  });
+
+  it("metrics is non-empty (was hardcoded to [])", () => {
+    expect(buildHeimdallDescriptor(HEALTHY_STATE).metrics.length).toBeGreaterThan(0);
+  });
+
+  it("every metric has the key/label/unit/kind/chart shape the schema expects", () => {
+    for (const m of buildHeimdallDescriptor(HEALTHY_STATE).metrics) {
+      expect(typeof m.key).toBe("string");
+      expect(typeof m.label).toBe("string");
+      expect(typeof m.unit).toBe("string");
+      expect(["gauge", "counter"]).toContain(m.kind);
+      expect(typeof m.chart).toBe("boolean");
+    }
+  });
+
+  it("reflects live active_polls and bot_connected values", () => {
+    const metrics = buildHeimdallDescriptor(HEALTHY_STATE).metrics;
+    const activePolls = metrics.find((m) => m.key === "active_polls");
+    const botConnected = metrics.find((m) => m.key === "bot_connected");
+    expect(activePolls?.value).toBe(2);
+    expect(botConnected?.value).toBe(1);
+  });
+
+  it("reflects live triage competence stats (decisions, latency, tokens)", () => {
+    const metrics = buildHeimdallDescriptor(HEALTHY_STATE).metrics;
+    const total = metrics.find((m) => m.key === "triage_decisions_total");
+    const latency = metrics.find((m) => m.key === "triage_avg_latency_ms");
+    const inputTokens = metrics.find((m) => m.key === "triage_avg_input_tokens");
+    const outputTokens = metrics.find((m) => m.key === "triage_avg_output_tokens");
+    expect(total?.value).toBe(7);
+    expect(latency?.value).toBe(842);
+    expect(inputTokens?.value).toBe(310);
+    expect(outputTokens?.value).toBe(64);
+  });
+
+  it("zeroes out to 0/0 gracefully when nothing has happened yet (no NaN)", () => {
+    const metrics = buildHeimdallDescriptor(DOWN_STATE).metrics;
+    for (const m of metrics) {
+      expect(Number.isFinite(m.value)).toBe(true);
+    }
   });
 });
 
