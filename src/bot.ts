@@ -3,6 +3,7 @@ import { config } from "./config.js";
 import { MuninClient } from "./munin-client.js";
 import { ResultPoller } from "./result-poller.js";
 import { gatherContext, triage, summarizeResult } from "./concierge.js";
+import type { TriageAction, TriageMeta } from "./concierge.js";
 import { submitTask } from "./task-writer.js";
 import { formatResultWithSummary } from "./telegram-util.js";
 import { MessageAggregator } from "./message-aggregator.js";
@@ -11,6 +12,52 @@ import { MessageTracker } from "./message-tracker.js";
 import type { TrackedMessage } from "./message-tracker.js";
 import { downloadPhoto, downloadFile } from "./telegram-file.js";
 import { createTranscriber, checkVoiceLimits } from "./transcribe.js";
+import type { TriageStats } from "./triage-stats.js";
+
+const TRIAGE_LOG_NAMESPACE = "ratatoskr/triage";
+
+/**
+ * Build the Munin competence-evidence log entry for a triage decision
+ * (issue #27) — action taken, model, latency, and token usage.
+ */
+export function buildTriageLogEntry(
+  action: TriageAction,
+  meta: TriageMeta
+): { namespace: string; content: string; tags: string[] } {
+  return {
+    namespace: TRIAGE_LOG_NAMESPACE,
+    content: JSON.stringify({
+      action,
+      model: meta.model,
+      latencyMs: meta.latencyMs,
+      inputTokens: meta.inputTokens,
+      outputTokens: meta.outputTokens,
+      timestamp: Date.now(),
+    }),
+    tags: ["triage", `action:${action}`, `instance:${config.instanceId}`],
+  };
+}
+
+/**
+ * Record triage competence evidence (issue #27): tally into TriageStats
+ * (synchronous, for /heimdall.json) and fire-and-forget log to Munin. Split
+ * out from handleTriageResult so this fire-and-forget contract — never block
+ * or fail message handling — is independently testable and can't silently
+ * regress into an awaited call.
+ */
+export function recordTriageEvidence(
+  munin: MuninClient,
+  triageStats: TriageStats,
+  result: Awaited<ReturnType<typeof triage>>
+): void {
+  triageStats.record(result.action, result.meta);
+  const logEntry = buildTriageLogEntry(result.action, result.meta);
+  munin
+    .log(logEntry.namespace, logEntry.content, logEntry.tags)
+    .catch((err) => {
+      console.error("Failed to log triage decision:", err);
+    });
+}
 
 /**
  * Build the one-time "picked up" ack callback for a task. Replies on the same
@@ -135,7 +182,8 @@ async function deleteConversation(
 
 export function createBot(
   munin: MuninClient,
-  poller: ResultPoller
+  poller: ResultPoller,
+  triageStats: TriageStats
 ): Bot {
   const bot = new Bot(config.telegramBotToken);
   // In-memory cache, backed by Munin persistence
@@ -247,6 +295,9 @@ export function createBot(
     result: Awaited<ReturnType<typeof triage>>,
     userHistoryText: string
   ): Promise<void> {
+    // Competence evidence (issue #27), fire-and-forget — see recordTriageEvidence.
+    recordTriageEvidence(munin, triageStats, result);
+
     switch (result.action) {
       case "ready": {
         await clearConversation(chatId);

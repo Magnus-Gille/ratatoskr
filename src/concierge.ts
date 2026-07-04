@@ -4,13 +4,25 @@ import { MuninClient } from "./munin-client.js";
 import { RATATOSKR_SOUL } from "./soul.js";
 import type { TrackedMessage } from "./message-tracker.js";
 
+export type TriageAction = "ready" | "clarify" | "answer";
+
+/** Competence evidence for a single triage call (issue #27) — model, latency,
+ *  and token usage, so it can be logged to Munin and rolled up for /heimdall.json. */
+export interface TriageMeta {
+  model: string;
+  latencyMs: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export type TriageResult =
   | {
       action: "ready";
       task: { prompt: string; context: string; timeout: number; title: string };
+      meta: TriageMeta;
     }
-  | { action: "clarify"; question: string }
-  | { action: "answer"; reply: string };
+  | { action: "clarify"; question: string; meta: TriageMeta }
+  | { action: "answer"; reply: string; meta: TriageMeta };
 
 const SYSTEM_PROMPT = `${RATATOSKR_SOUL}
 
@@ -151,12 +163,19 @@ export async function triage(
     }
   }
 
+  const startedAt = Date.now();
   const response = await client.messages.create({
     model: config.conciergeModel,
     max_tokens: 1024,
     system: systemContent,
     messages,
   });
+  const meta: TriageMeta = {
+    model: config.conciergeModel,
+    latencyMs: Date.now() - startedAt,
+    inputTokens: response.usage?.input_tokens ?? 0,
+    outputTokens: response.usage?.output_tokens ?? 0,
+  };
 
   const text =
     response.content[0].type === "text" ? response.content[0].text : "";
@@ -179,11 +198,12 @@ export async function triage(
         timeout: parsed.task.timeout || 600,
         title: parsed.task.title,
       },
+      meta,
     };
   } else if (parsed.action === "clarify" && parsed.question) {
-    return { action: "clarify", question: parsed.question };
+    return { action: "clarify", question: parsed.question, meta };
   } else if (parsed.action === "answer" && parsed.reply) {
-    return { action: "answer", reply: parsed.reply };
+    return { action: "answer", reply: parsed.reply, meta };
   }
 
   // Fallback: treat as answer if we got something
@@ -191,6 +211,7 @@ export async function triage(
     return {
       action: "answer",
       reply: parsed.reply || parsed.question || "I couldn't parse that.",
+      meta,
     };
   }
 
