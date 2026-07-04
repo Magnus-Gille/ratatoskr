@@ -335,10 +335,26 @@ async function triageViaM5(
       body.ledgerId
     );
   }
-  if (body.escalate === true || typeof body.output !== "string" || !body.output) {
-    // The local model ran but its output was unusable (verifier fail / empty).
+  if (body.delegated !== true) {
+    // Contract fields missing entirely — a schema-drifted or wrong endpoint
+    // response must never serve as a healthy M5 decision.
     throw new M5TriageError(
-      `local triage output unusable (outcome=${body.outcome ?? "unknown"}): ${
+      "gateway response missing the delegated contract field",
+      "infra",
+      body.ledgerId
+    );
+  }
+  if (
+    body.escalate === true ||
+    body.outcome !== "pass" ||
+    typeof body.output !== "string" ||
+    !body.output
+  ) {
+    // The local model ran but its output was unusable — verifier fail/error,
+    // empty output, or an outcome the contract doesn't call a pass. We always
+    // send a verifier, so anything but an explicit "pass" is a failed attempt.
+    throw new M5TriageError(
+      `local triage output unusable (outcome=${body.outcome ?? "missing"}): ${
         body.decisionReason ?? "no reason given"
       }`,
       "parse",
@@ -349,11 +365,12 @@ async function triageViaM5(
   let decision: TriageDecision;
   try {
     decision = parseTriageDecision(body.output, { lenient: false });
-  } catch (err) {
+  } catch {
+    // Deliberately content-free: the parse error embeds the raw model output,
+    // which can echo the user's message — that must never reach persisted
+    // attempt records (Munin) or log lines.
     throw new M5TriageError(
-      `local triage output failed strict parse: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
+      "local triage output failed strict parse (not a valid triage decision)",
       "parse",
       body.ledgerId
     );

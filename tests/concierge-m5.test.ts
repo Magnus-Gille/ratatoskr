@@ -326,6 +326,70 @@ describe("triage via the M5 gateway (issue #31)", () => {
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
+  // Codex review findings (PR #32): enforce the gateway outcome contract and
+  // never leak raw model output (which can echo user message content) into
+  // persisted attempt records.
+  it("falls back when the verifier outcome is not pass, even if the output would parse (errorClass=parse)", async () => {
+    const fetchImpl = fetchOkJson({
+      ...gatewaySuccess({ action: "answer", reply: "looks fine" }),
+      outcome: "fail",
+    });
+    anthropicAnswers("frontier served");
+
+    const result = await triage("hi", [], "No context", null, undefined, {
+      fetchImpl,
+    });
+
+    expect(result.meta.backend).toBe("anthropic");
+    expect(result.meta.fallback).toBe(true);
+    expect(result.meta.attempts[0]).toMatchObject({
+      backend: "m5",
+      outcome: "error",
+      errorClass: "parse",
+    });
+  });
+
+  it("falls back when the response lacks the delegated/outcome contract fields (schema drift → infra)", async () => {
+    // A 200 body with output but no delegated/outcome markers must not serve
+    // as a healthy M5 decision.
+    const fetchImpl = fetchOkJson({
+      output: JSON.stringify({ action: "answer", reply: "drifted" }),
+    });
+    anthropicAnswers("fallback");
+
+    const result = await triage("hi", [], "No context", null, undefined, {
+      fetchImpl,
+    });
+
+    expect(result.meta.backend).toBe("anthropic");
+    expect(result.meta.attempts[0]).toMatchObject({
+      backend: "m5",
+      outcome: "error",
+      errorClass: "infra",
+    });
+  });
+
+  it("never leaks raw local-model output into the recorded attempt error or the warn line", async () => {
+    // The local model parroted the user's message back in an invalid shape;
+    // that content must not reach Munin-persisted attempt records or logs.
+    const secret = "SECRET-TELEGRAM-CONTENT-42";
+    const fetchImpl = fetchOkJson(
+      gatewaySuccess({ echo: `the user said: ${secret}` })
+    );
+    anthropicAnswers("fallback");
+
+    const result = await triage("hi", [], "No context", null, undefined, {
+      fetchImpl,
+    });
+
+    expect(result.meta.fallback).toBe(true);
+    expect(result.meta.attempts[0].error).toBeDefined();
+    expect(result.meta.attempts[0].error).not.toContain(secret);
+    for (const call of warnSpy.mock.calls) {
+      expect(String(call[0])).not.toContain(secret);
+    }
+  });
+
   it("treats invalid gateway response JSON as infra failure and falls back", async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: true,
