@@ -18,7 +18,10 @@ const TRIAGE_LOG_NAMESPACE = "ratatoskr/triage";
 
 /**
  * Build the Munin competence-evidence log entry for a triage decision
- * (issue #27) — action taken, model, latency, and token usage.
+ * (issues #27/#31) — action taken, serving backend + model, latency, token
+ * usage, and every routing attempt (the ledger-ingestable outcome records;
+ * M5-served attempts also land in the gateway's own capability ledger, keyed
+ * by the attempt's ledgerId).
  */
 export function buildTriageLogEntry(
   action: TriageAction,
@@ -29,12 +32,21 @@ export function buildTriageLogEntry(
     content: JSON.stringify({
       action,
       model: meta.model,
+      backend: meta.backend,
+      fallback: meta.fallback,
+      attempts: meta.attempts,
       latencyMs: meta.latencyMs,
       inputTokens: meta.inputTokens,
       outputTokens: meta.outputTokens,
       timestamp: Date.now(),
     }),
-    tags: ["triage", `action:${action}`, `instance:${config.instanceId}`],
+    tags: [
+      "triage",
+      `action:${action}`,
+      `backend:${meta.backend}`,
+      ...(meta.fallback ? ["fallback:m5"] : []),
+      `instance:${config.instanceId}`,
+    ],
   };
 }
 

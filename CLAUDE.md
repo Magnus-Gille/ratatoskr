@@ -26,8 +26,8 @@ Part of the Grimnir system: **Munin** (memory), **Hugin** (task dispatcher), **R
 
 - `src/index.ts` — Express app (health endpoint + registers `/api/send` route) + bot startup + poll recovery
 - `src/bot.ts` — Telegram bot setup, message/photo/voice handlers, allowlist, conversation persistence; shared `handleTriageResult` drives submit/clarify/answer for all input types, and fire-and-forget logs each triage decision to Munin (`ratatoskr/triage`) + records it in `TriageStats` (issue #27)
-- `src/concierge.ts` — Intent triage via Claude Haiku API (multimodal: text + images), result summarization; `triage()` returns a `meta` field (model, latency, input/output tokens) alongside the action (issue #27)
-- `src/triage-stats.ts` — `TriageStats`: in-memory (process-lifetime) tally of triage decisions by action + avg latency/tokens, read by `/heimdall.json` for real competence metrics (issue #27)
+- `src/concierge.ts` — Intent triage (multimodal: text + images) + result summarization. Text triage classification routes through the M5 gateway's `POST /delegate` when `RATATOSKR_TRIAGE_URL` is set (issue #31) — the gateway records each attempt in the Pillar-2 capability ledger — with graceful, visible fallback to the Anthropic Haiku path on any gateway error/timeout; image triage and summarization stay on Anthropic. `triage()` returns a `meta` field (serving backend, model, fallback flag, per-attempt routing outcomes, latency, tokens) alongside the action (issues #27/#31)
+- `src/triage-stats.ts` — `TriageStats`: in-memory (process-lifetime) tally of triage decisions by action + serving backend + M5 fallbacks + avg latency/tokens, read by `/heimdall.json` for real competence metrics (issues #27/#31)
 - `src/soul.ts` — `RATATOSKR_SOUL` constant defining Ratatoskr's voice/personality for all Telegram output
 - `src/task-writer.ts` — Format task markdown, write to Munin (with instance tag)
 - `src/result-poller.ts` — Poll Munin for task results, delivery confirmation; fires a one-time "picked up" ack on the first `running` transition (issue #2), de-duped via a persisted Munin marker so a restart doesn't re-announce
@@ -115,6 +115,11 @@ see **`docs/remote-send.md`** (bind `HOST` to the Tailscale IP + set
 | `RATATOSKR_TRANSCRIBE_TOKEN` | — | Optional Bearer token if the local transcription endpoint is auth-gated. |
 | `RATATOSKR_TRANSCRIBE_ALLOW_REMOTE` | `false` | Opt-in to a non-local transcription endpoint (suppresses the "audio off-box" startup warning). |
 | `RATATOSKR_VOICE_MAX_DURATION_S` | `300` | Reject voice notes longer than this (seconds) before downloading/transcribing. |
+| `RATATOSKR_TRIAGE_URL` | — | M5 gateway `POST /delegate` endpoint for triage classification (issue #31), e.g. `http://<m5-tailnet-ip>:8080/delegate`. Unset → triage stays on the Anthropic path exactly as before (feature off). |
+| `RATATOSKR_TRIAGE_MODEL` | `qwen3-30b-instruct` | Local model id pinned for M5 triage classification (pinned so the ledger's per-model dataset is controlled). |
+| `RATATOSKR_TRIAGE_API_KEY` | — | Owner-tier Bearer token for the gateway's `/delegate` route (owner-tier-only; without it every call 401s and falls back — warned at boot). |
+| `RATATOSKR_TRIAGE_TIMEOUT_MS` | `8000` | Bounded timeout for the M5 triage call; on expiry triage falls back to Anthropic (visible via log line + `m5_triage_fallbacks` metric). |
+| `RATATOSKR_TRIAGE_ALLOW_REMOTE` | `false` | Opt-in to a non-local triage endpoint (suppresses the "message content off-box" startup warning). |
 
 ## Concierge design
 
@@ -129,6 +134,16 @@ It returns one of three actions:
 - `answer` — can be answered directly from context, no task needed
 
 Tone is defined by `RATATOSKR_SOUL` in `src/soul.ts` — casual, terse, warm, plain text only.
+
+### M5 triage routing (issue #31)
+
+When `RATATOSKR_TRIAGE_URL` is set, text-only triage classification is sent to the M5 gateway's `POST /delegate` (owner-tier) instead of the Anthropic SDK. The gateway runs the pinned local model (`RATATOSKR_TRIAGE_MODEL`), grades the output with a `matches` verifier on the `action` field, and records the attempt in its **capability ledger** (`GET /ledger`) — making triage the first production workload feeding Pillar 2. Semantics:
+
+- **Never drop a message:** any gateway failure (timeout after `RATATOSKR_TRIAGE_TIMEOUT_MS`, non-2xx, policy block, unusable/unparseable output) falls back to the existing Anthropic path.
+- **Strict parse on the local lane:** M5 output must be a fully valid triage decision; the lenient `{reply}`-rescue only applies to the Anthropic path (preserves historical behavior).
+- **Fallbacks are visible:** a `console.warn` line + the `m5_triage_fallbacks` counter in `/heimdall.json` (plus `triage_m5_served` for the healthy path).
+- **Evidence captures the backend:** each Munin `ratatoskr/triage` entry includes `backend`, `fallback`, and an `attempts[]` array (per-attempt routing outcomes in the ledger's vocabulary), tagged `backend:<x>` / `fallback:m5`.
+- **Images and result summarization stay on Anthropic** — this is triage classification only.
 
 ### Result formatting pipeline
 

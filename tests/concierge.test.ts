@@ -332,9 +332,41 @@ describe("concierge", () => {
       expect(result.action).toBe("clarify");
       expect(result.meta).toEqual({
         model: "claude-haiku-4-5-20251001",
+        backend: "anthropic",
+        fallback: false,
         latencyMs: expect.any(Number),
         inputTokens: 10,
         outputTokens: 2,
+        attempts: [
+          {
+            backend: "anthropic",
+            model: "claude-haiku-4-5-20251001",
+            outcome: "pass",
+            latencyMs: expect.any(Number),
+          },
+        ],
+      });
+    });
+
+    // Issue #31 activation gate: with RATATOSKR_TRIAGE_URL unset (this file's
+    // config mock), behavior is exactly the pre-#31 Anthropic path.
+    it("serves from Anthropic with backend metadata when no triage gateway is configured", async () => {
+      mockCreate.mockResolvedValue({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ action: "answer", reply: "Hello!" }),
+          },
+        ],
+      });
+
+      const result = await triage("hi", [], "No context");
+      expect(result.meta.backend).toBe("anthropic");
+      expect(result.meta.fallback).toBe(false);
+      expect(result.meta.attempts).toHaveLength(1);
+      expect(result.meta.attempts[0]).toMatchObject({
+        backend: "anthropic",
+        outcome: "pass",
       });
     });
 

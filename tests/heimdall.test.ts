@@ -115,6 +115,8 @@ const HEALTHY_STATE: DescriptorState = {
   triage: {
     total: 7,
     byAction: { ready: 3, clarify: 1, answer: 3 },
+    byBackend: { m5: 5, anthropic: 2 },
+    m5Fallbacks: 1,
     avgLatencyMs: 842,
     avgInputTokens: 310,
     avgOutputTokens: 64,
@@ -124,7 +126,15 @@ const HEALTHY_STATE: DescriptorState = {
 const DOWN_STATE: DescriptorState = {
   botConnected: false,
   activePolls: 0,
-  triage: { total: 0, byAction: { ready: 0, clarify: 0, answer: 0 }, avgLatencyMs: 0, avgInputTokens: 0, avgOutputTokens: 0 },
+  triage: {
+    total: 0,
+    byAction: { ready: 0, clarify: 0, answer: 0 },
+    byBackend: { m5: 0, anthropic: 0 },
+    m5Fallbacks: 0,
+    avgLatencyMs: 0,
+    avgInputTokens: 0,
+    avgOutputTokens: 0,
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -277,6 +287,18 @@ describe("GET /heimdall.json — real status and metrics (issue #27)", () => {
     expect(latency?.value).toBe(842);
     expect(inputTokens?.value).toBe(310);
     expect(outputTokens?.value).toBe(64);
+  });
+
+  // Issue #31: backend routing visibility — a degraded (all-fallback) path
+  // must not look identical to a healthy M5-served one on the dashboard.
+  it("exposes triage_m5_served and m5_triage_fallbacks counters", () => {
+    const metrics = buildHeimdallDescriptor(HEALTHY_STATE).metrics;
+    const served = metrics.find((m) => m.key === "triage_m5_served");
+    const fallbacks = metrics.find((m) => m.key === "m5_triage_fallbacks");
+    expect(served?.value).toBe(5);
+    expect(served?.kind).toBe("counter");
+    expect(fallbacks?.value).toBe(1);
+    expect(fallbacks?.kind).toBe("counter");
   });
 
   it("zeroes out to 0/0 gracefully when nothing has happened yet (no NaN)", () => {
