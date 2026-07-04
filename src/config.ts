@@ -65,6 +65,22 @@ export const config = {
     process.env.RATATOSKR_VOICE_MAX_DURATION_S,
     300
   ),
+  // M5 triage routing (issue #31). Points at the M5 gateway's POST /delegate
+  // endpoint (e.g. http://<m5-tailnet-ip>:8080/delegate) so triage
+  // classification runs on a local model and every attempt lands in the
+  // gateway's capability ledger (Pillar 2). When triageUrl is unset the
+  // concierge uses the Anthropic path exactly as before — feature OFF.
+  triageUrl: process.env.RATATOSKR_TRIAGE_URL || "",
+  triageModel: process.env.RATATOSKR_TRIAGE_MODEL || "qwen3-30b-instruct",
+  triageApiKey: process.env.RATATOSKR_TRIAGE_API_KEY || "",
+  // Bounded: a Pi→tailnet /delegate call must fail fast into the Anthropic
+  // fallback rather than stall a Telegram reply (cold model swaps take longer
+  // than this on purpose — a cold gateway degrades to fallback, visibly).
+  triageTimeoutMs: positiveIntEnv(process.env.RATATOSKR_TRIAGE_TIMEOUT_MS, 8000),
+  // Acknowledge sending triage message content off-box (suppresses the
+  // non-local-endpoint warning), mirroring RATATOSKR_TRANSCRIBE_ALLOW_REMOTE.
+  triageAllowRemote:
+    (process.env.RATATOSKR_TRIAGE_ALLOW_REMOTE || "").toLowerCase() === "true",
 };
 
 /**
@@ -180,6 +196,32 @@ export function validateConfig(): void {
       `⚠️  RATATOSKR_TRANSCRIBE_URL (${config.transcribeUrl}) does not look local — ` +
         `voice audio would be sent OFF-BOX to it. Use a local Whisper endpoint, or set ` +
         `RATATOSKR_TRANSCRIBE_ALLOW_REMOTE=true to acknowledge sending audio remotely.`
+    );
+  }
+
+  // M5 triage routing posture (issue #31) — same privacy stance as
+  // transcription: triage message content must not silently leave the box.
+  if (
+    config.triageUrl &&
+    !config.triageAllowRemote &&
+    !isLocalHost(config.triageUrl)
+  ) {
+    console.warn(
+      `⚠️  RATATOSKR_TRIAGE_URL (${config.triageUrl}) does not look local — ` +
+        `triage message content would be sent OFF-BOX to it. Point it at the M5 ` +
+        `gateway's tailnet address, or set RATATOSKR_TRIAGE_ALLOW_REMOTE=true to ` +
+        `acknowledge sending message content remotely.`
+    );
+  }
+
+  // The gateway's /delegate route is owner-tier-only; without a key every
+  // triage call would 401 and fall back to Anthropic — permanently degraded,
+  // so make the misconfig loud at boot instead of just a fallback counter.
+  if (config.triageUrl && !config.triageApiKey) {
+    console.warn(
+      `⚠️  RATATOSKR_TRIAGE_URL is set but RATATOSKR_TRIAGE_API_KEY is empty — the M5 ` +
+        `gateway's /delegate endpoint is owner-tier-only, so every triage call will fail ` +
+        `and fall back to Anthropic until the key is set.`
     );
   }
 }

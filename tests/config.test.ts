@@ -187,6 +187,74 @@ describe("config validation", () => {
     expect(() => validateConfig()).not.toThrow();
     expect(mockWarn).not.toHaveBeenCalled();
   });
+
+  // M5 triage gateway (issue #31) — same privacy posture as transcription:
+  // message content must not silently leave the box.
+  it("parses the triage gateway env vars with safe defaults", async () => {
+    setRequired();
+    delete process.env.RATATOSKR_TRIAGE_URL;
+    delete process.env.RATATOSKR_TRIAGE_MODEL;
+    delete process.env.RATATOSKR_TRIAGE_API_KEY;
+    delete process.env.RATATOSKR_TRIAGE_TIMEOUT_MS;
+
+    const { config } = await import("../src/config.js");
+    expect(config.triageUrl).toBe(""); // feature OFF by default
+    expect(config.triageModel).toBe("qwen3-30b-instruct");
+    expect(config.triageApiKey).toBe("");
+    expect(config.triageTimeoutMs).toBe(8000);
+  });
+
+  it("warns when RATATOSKR_TRIAGE_URL is a non-local endpoint", async () => {
+    setRequired();
+    process.env.RATATOSKR_TRIAGE_URL = "https://inference.example.com/delegate";
+    process.env.RATATOSKR_TRIAGE_API_KEY = "k";
+    delete process.env.RATATOSKR_TRIAGE_ALLOW_REMOTE;
+
+    const { validateConfig } = await import("../src/config.js");
+    expect(() => validateConfig()).not.toThrow();
+    expect(mockWarn).toHaveBeenCalledWith(expect.stringContaining("OFF-BOX"));
+  });
+
+  it("does not warn for a tailnet triage endpoint with a key set", async () => {
+    setRequired();
+    process.env.RATATOSKR_TRIAGE_URL = "http://100.76.72.59:8080/delegate";
+    process.env.RATATOSKR_TRIAGE_API_KEY = "k";
+
+    const { validateConfig } = await import("../src/config.js");
+    expect(() => validateConfig()).not.toThrow();
+    expect(mockWarn).not.toHaveBeenCalled();
+  });
+
+  it("does not warn for a remote triage endpoint when ALLOW_REMOTE is set", async () => {
+    setRequired();
+    process.env.RATATOSKR_TRIAGE_URL = "https://inference.example.com/delegate";
+    process.env.RATATOSKR_TRIAGE_API_KEY = "k";
+    process.env.RATATOSKR_TRIAGE_ALLOW_REMOTE = "true";
+
+    const { validateConfig } = await import("../src/config.js");
+    expect(() => validateConfig()).not.toThrow();
+    expect(mockWarn).not.toHaveBeenCalled();
+  });
+
+  it("warns when the triage URL is set without an API key (owner-tier /delegate would 401)", async () => {
+    setRequired();
+    process.env.RATATOSKR_TRIAGE_URL = "http://100.76.72.59:8080/delegate";
+    delete process.env.RATATOSKR_TRIAGE_API_KEY;
+
+    const { validateConfig } = await import("../src/config.js");
+    expect(() => validateConfig()).not.toThrow();
+    expect(mockWarn).toHaveBeenCalledWith(
+      expect.stringContaining("RATATOSKR_TRIAGE_API_KEY")
+    );
+  });
+
+  it("sanitizes an invalid triage timeout to the default", async () => {
+    setRequired();
+    process.env.RATATOSKR_TRIAGE_TIMEOUT_MS = "notanumber";
+
+    const { config } = await import("../src/config.js");
+    expect(config.triageTimeoutMs).toBe(8000);
+  });
 });
 
 describe("isLocalHost", () => {

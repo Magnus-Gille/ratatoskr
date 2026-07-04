@@ -58,14 +58,31 @@ import { TriageStats } from "../src/triage-stats.js";
 import type { MuninClient } from "../src/munin-client.js";
 import type { TriageResult } from "../src/concierge.js";
 
+import type { TriageMeta } from "../src/concierge.js";
+
+function makeMeta(overrides: Partial<TriageMeta> = {}): TriageMeta {
+  return {
+    model: "claude-haiku-4-5-20251001",
+    backend: "anthropic",
+    fallback: false,
+    latencyMs: 842,
+    inputTokens: 310,
+    outputTokens: 64,
+    attempts: [
+      {
+        backend: "anthropic",
+        model: "claude-haiku-4-5-20251001",
+        outcome: "pass",
+        latencyMs: 842,
+      },
+    ],
+    ...overrides,
+  };
+}
+
 describe("buildTriageLogEntry", () => {
   it("builds a Munin log entry with action, model, latency, and tokens", () => {
-    const entry = buildTriageLogEntry("ready", {
-      model: "claude-haiku-4-5-20251001",
-      latencyMs: 842,
-      inputTokens: 310,
-      outputTokens: 64,
-    });
+    const entry = buildTriageLogEntry("ready", makeMeta());
 
     expect(entry.namespace).toBe("ratatoskr/triage");
     const content = JSON.parse(entry.content);
@@ -83,21 +100,79 @@ describe("buildTriageLogEntry", () => {
   });
 
   it("tags clarify and answer decisions with their own action tag", () => {
-    const clarify = buildTriageLogEntry("clarify", {
-      model: "m",
-      latencyMs: 1,
-      inputTokens: 1,
-      outputTokens: 1,
-    });
+    const clarify = buildTriageLogEntry("clarify", makeMeta({ latencyMs: 1 }));
     expect(clarify.tags).toContain("action:clarify");
 
-    const answer = buildTriageLogEntry("answer", {
-      model: "m",
-      latencyMs: 1,
-      inputTokens: 1,
-      outputTokens: 1,
-    });
+    const answer = buildTriageLogEntry("answer", makeMeta({ latencyMs: 1 }));
     expect(answer.tags).toContain("action:answer");
+  });
+
+  // Issue #31: the competence evidence must capture WHICH backend served the
+  // decision, and each routing attempt (the ledger-ingestable outcome record).
+  it("records the serving backend + per-attempt routing outcomes in content and tags", () => {
+    const entry = buildTriageLogEntry(
+      "answer",
+      makeMeta({
+        model: "qwen3-30b-instruct",
+        backend: "m5",
+        attempts: [
+          {
+            backend: "m5",
+            model: "qwen3-30b-instruct",
+            outcome: "pass",
+            latencyMs: 900,
+            ledgerId: "led-1",
+          },
+        ],
+      })
+    );
+
+    const content = JSON.parse(entry.content);
+    expect(content.backend).toBe("m5");
+    expect(content.fallback).toBe(false);
+    expect(content.attempts).toEqual([
+      {
+        backend: "m5",
+        model: "qwen3-30b-instruct",
+        outcome: "pass",
+        latencyMs: 900,
+        ledgerId: "led-1",
+      },
+    ]);
+    expect(entry.tags).toContain("backend:m5");
+  });
+
+  it("tags a fallback-served decision so degraded routing is queryable", () => {
+    const entry = buildTriageLogEntry(
+      "answer",
+      makeMeta({
+        backend: "anthropic",
+        fallback: true,
+        attempts: [
+          {
+            backend: "m5",
+            model: "qwen3-30b-instruct",
+            outcome: "error",
+            errorClass: "timeout",
+            latencyMs: 5000,
+            error: "The operation timed out",
+          },
+          {
+            backend: "anthropic",
+            model: "claude-haiku-4-5-20251001",
+            outcome: "pass",
+            latencyMs: 700,
+          },
+        ],
+      })
+    );
+
+    const content = JSON.parse(entry.content);
+    expect(content.fallback).toBe(true);
+    expect(content.attempts).toHaveLength(2);
+    expect(content.attempts[0].errorClass).toBe("timeout");
+    expect(entry.tags).toContain("backend:anthropic");
+    expect(entry.tags).toContain("fallback:m5");
   });
 });
 
@@ -106,7 +181,7 @@ describe("recordTriageEvidence", () => {
     return {
       action: "answer",
       reply: "hi",
-      meta: { model: "m", latencyMs: 1, inputTokens: 1, outputTokens: 1 },
+      meta: makeMeta({ model: "m", latencyMs: 1, inputTokens: 1, outputTokens: 1 }),
     };
   }
 

@@ -88,6 +88,24 @@ function buildMetrics(state: DescriptorState): DescriptorMetric[] {
       chart: true,
       value: state.triage.avgLatencyMs,
     },
+    // Issue #31: M5 routing visibility — an all-fallback (degraded) path must
+    // never look identical to a healthy M5-served one on the dashboard.
+    {
+      key: "triage_m5_served",
+      label: "Triage served by M5",
+      unit: "",
+      kind: "counter",
+      chart: true,
+      value: state.triage.byBackend.m5,
+    },
+    {
+      key: "m5_triage_fallbacks",
+      label: "M5 triage fallbacks",
+      unit: "",
+      kind: "counter",
+      chart: true,
+      value: state.triage.m5Fallbacks,
+    },
     {
       key: "triage_avg_input_tokens",
       label: "Triage avg input tokens",
