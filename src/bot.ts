@@ -39,6 +39,27 @@ export function buildTriageLogEntry(
 }
 
 /**
+ * Record triage competence evidence (issue #27): tally into TriageStats
+ * (synchronous, for /heimdall.json) and fire-and-forget log to Munin. Split
+ * out from handleTriageResult so this fire-and-forget contract — never block
+ * or fail message handling — is independently testable and can't silently
+ * regress into an awaited call.
+ */
+export function recordTriageEvidence(
+  munin: MuninClient,
+  triageStats: TriageStats,
+  result: Awaited<ReturnType<typeof triage>>
+): void {
+  triageStats.record(result.action, result.meta);
+  const logEntry = buildTriageLogEntry(result.action, result.meta);
+  munin
+    .log(logEntry.namespace, logEntry.content, logEntry.tags)
+    .catch((err) => {
+      console.error("Failed to log triage decision:", err);
+    });
+}
+
+/**
  * Build the one-time "picked up" ack callback for a task. Replies on the same
  * chat as the originating context. A send failure is allowed to propagate so the
  * poller can retry on a later poll and only persist its "acked" marker once the
@@ -274,16 +295,8 @@ export function createBot(
     result: Awaited<ReturnType<typeof triage>>,
     userHistoryText: string
   ): Promise<void> {
-    // Competence evidence (issue #27) — record in-process for /heimdall.json
-    // metrics and log to Munin for the triage-competence dataset. Fire-and-forget:
-    // a Munin outage must never block or fail message handling.
-    triageStats.record(result.action, result.meta);
-    const logEntry = buildTriageLogEntry(result.action, result.meta);
-    munin
-      .log(logEntry.namespace, logEntry.content, logEntry.tags)
-      .catch((err) => {
-        console.error("Failed to log triage decision:", err);
-      });
+    // Competence evidence (issue #27), fire-and-forget — see recordTriageEvidence.
+    recordTriageEvidence(munin, triageStats, result);
 
     switch (result.action) {
       case "ready": {

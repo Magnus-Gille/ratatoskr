@@ -53,7 +53,10 @@ vi.mock("grammy", () => ({
   Context: vi.fn(),
 }));
 
-import { buildTriageLogEntry } from "../src/bot.js";
+import { buildTriageLogEntry, recordTriageEvidence } from "../src/bot.js";
+import { TriageStats } from "../src/triage-stats.js";
+import type { MuninClient } from "../src/munin-client.js";
+import type { TriageResult } from "../src/concierge.js";
 
 describe("buildTriageLogEntry", () => {
   it("builds a Munin log entry with action, model, latency, and tokens", () => {
@@ -95,5 +98,47 @@ describe("buildTriageLogEntry", () => {
       outputTokens: 1,
     });
     expect(answer.tags).toContain("action:answer");
+  });
+});
+
+describe("recordTriageEvidence", () => {
+  function fakeResult(): TriageResult {
+    return {
+      action: "answer",
+      reply: "hi",
+      meta: { model: "m", latencyMs: 1, inputTokens: 1, outputTokens: 1 },
+    };
+  }
+
+  it("records into TriageStats synchronously, before munin.log() settles", () => {
+    const stats = new TriageStats();
+    const munin = {
+      log: vi.fn().mockResolvedValue(undefined),
+    } as unknown as MuninClient;
+
+    recordTriageEvidence(munin, stats, fakeResult());
+
+    // Synchronous effect — no await needed to observe it.
+    expect(stats.snapshot().total).toBe(1);
+    expect(munin.log).toHaveBeenCalledWith(
+      "ratatoskr/triage",
+      expect.any(String),
+      expect.arrayContaining(["triage", "action:answer"])
+    );
+  });
+
+  it("never throws or produces an unhandled rejection when munin.log() rejects", async () => {
+    const stats = new TriageStats();
+    const munin = {
+      log: vi.fn().mockRejectedValue(new Error("munin down")),
+    } as unknown as MuninClient;
+
+    expect(() => recordTriageEvidence(munin, stats, fakeResult())).not.toThrow();
+    // Stats recording must not be skipped just because the log call will fail.
+    expect(stats.snapshot().total).toBe(1);
+
+    // Let the rejected promise's .catch() settle — proves it's handled, not
+    // left dangling as an unhandled rejection that would crash the process.
+    await new Promise((resolve) => setImmediate(resolve));
   });
 });
