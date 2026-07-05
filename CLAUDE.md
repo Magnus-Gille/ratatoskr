@@ -116,7 +116,7 @@ see **`docs/remote-send.md`** (bind `HOST` to the Tailscale IP + set
 | `RATATOSKR_TRANSCRIBE_ALLOW_REMOTE` | `false` | Opt-in to a non-local transcription endpoint (suppresses the "audio off-box" startup warning). |
 | `RATATOSKR_VOICE_MAX_DURATION_S` | `300` | Reject voice notes longer than this (seconds) before downloading/transcribing. |
 | `RATATOSKR_TRIAGE_URL` | — | M5 gateway `POST /delegate` endpoint for triage classification (issue #31), e.g. `http://<m5-tailnet-ip>:8080/delegate`. Unset → triage stays on the Anthropic path exactly as before (feature off). |
-| `RATATOSKR_TRIAGE_MODEL` | `qwen3-30b-instruct` | Local model id pinned for M5 triage classification (pinned so the ledger's per-model dataset is controlled). |
+| `RATATOSKR_TRIAGE_MODEL` | `mellum` | Local model id pinned for M5 triage classification (pinned so the ledger's per-model dataset is controlled). Default `mellum` per issue #33 — beats `qwen3-30b-instruct` on accuracy (90% vs 84%), `ready` recall (88% vs 67%), and latency, with a smaller cold-swap window. |
 | `RATATOSKR_TRIAGE_API_KEY` | — | Owner-tier Bearer token for the gateway's `/delegate` route (owner-tier-only; without it every call 401s and falls back — warned at boot). |
 | `RATATOSKR_TRIAGE_TIMEOUT_MS` | `8000` | Bounded timeout for the M5 triage call; on expiry triage falls back to Anthropic (visible via log line + `m5_triage_fallbacks` metric). |
 | `RATATOSKR_TRIAGE_ALLOW_REMOTE` | `false` | Opt-in to a non-local triage endpoint (suppresses the "message content off-box" startup warning). |
