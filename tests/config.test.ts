@@ -199,7 +199,7 @@ describe("config validation", () => {
 
     const { config } = await import("../src/config.js");
     expect(config.triageUrl).toBe(""); // feature OFF by default
-    expect(config.triageModel).toBe("qwen3-30b-instruct");
+    expect(config.triageModel).toBe("mellum");
     expect(config.triageApiKey).toBe("");
     expect(config.triageTimeoutMs).toBe(8000);
   });

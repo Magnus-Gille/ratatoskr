@@ -71,7 +71,7 @@ export const config = {
   // gateway's capability ledger (Pillar 2). When triageUrl is unset the
   // concierge uses the Anthropic path exactly as before — feature OFF.
   triageUrl: process.env.RATATOSKR_TRIAGE_URL || "",
-  triageModel: process.env.RATATOSKR_TRIAGE_MODEL || "qwen3-30b-instruct",
+  triageModel: process.env.RATATOSKR_TRIAGE_MODEL || "mellum",
   triageApiKey: process.env.RATATOSKR_TRIAGE_API_KEY || "",
   // Bounded: a Pi→tailnet /delegate call must fail fast into the Anthropic
   // fallback rather than stall a Telegram reply (cold model swaps take longer
