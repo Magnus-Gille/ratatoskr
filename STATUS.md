@@ -1,9 +1,42 @@
 # Ratatoskr Status
 
-**Last session:** 2026-06-24
+**Last session:** 2026-07-05
 **Branch:** main
 
-## Completed This Session (2026-06-24) — autonomous, 4 PRs merged + deployed
+## Completed This Session (2026-07-05) — issue #33: triage default → mellum, merged + deployed
+
+Switched the M5 triage default model **`qwen3-30b-instruct` → `mellum`** (issue
+#33). One-line code-default change in `src/config.ts:74` (`RATATOSKR_TRIAGE_MODEL`
+fallback), plus the matching `tests/config.test.ts` default-value assertion,
+`.env.example`, and the `CLAUDE.md` env-var table (with rationale note).
+
+**Why (issue #33, 120-item production-faithful corpus 2026-07-04, exact prod
+systemPrompt/verifier):** mellum beats qwen3-30b on overall accuracy (90% vs 84%),
+`ready` recall (**88% vs 67%** — under-dispatch was the dominant user-visible
+failure), latency (p50 342 vs 446 ms), and cold-swap window (~6–15s vs ~13–34s),
+with 0 calls over the 8s timeout vs 1. `RATATOSKR_TRIAGE_TIMEOUT_MS` stays 8000.
+
+**PR #34** (squash `1148ea2`): Codex cross-model review (gpt-5.5, xhigh) **clean,
+zero findings**; suite green (**296/296**); CI `build-test` passed. Closed #33.
+
+**Deployed to huginmunin** via `scripts/deploy-pi.sh`:
+- Verified rather than assumed — the Pi's `.env` does **not** pin
+  `RATATOSKR_TRIAGE_MODEL`, so the code default governs; no env edit was needed.
+  (The pre-deploy running `dist` still had the old `qwen3-30b-instruct` default —
+  deploy flipped it.)
+- Post-deploy: service `active`, `/health` **200** on the Tailscale bind
+  `100.97.117.37:3034` (not loopback), deployed `dist/config.js` default confirmed
+  `mellum`, M5 lane live (`RATATOSKR_TRIAGE_URL=…100.76.72.59:8080/delegate` +
+  owner key; no off-box warning — CGNAT range is treated as local), descriptor
+  triage metrics present (`triage_m5_served`/`m5_triage_fallbacks` both 0 at fresh
+  restart), boot logs clean.
+
+**Follow-up (acceptance monitoring, needs real traffic):** watch `triage_m5_served`
+vs `m5_triage_fallbacks` over ~a day — fallback rate should drop vs the qwen3
+baseline (smaller cold-swap window). No live triage request has hit mellum since
+the restart yet; only the wiring is confirmed.
+
+## Completed (2026-06-24) — autonomous, 4 PRs merged + deployed
 
 All four landed test-first (red→green), each with a cross-model Codex review
 (gpt-5.5, xhigh) whose findings were fixed before merge (#16 also got a 4-lens
