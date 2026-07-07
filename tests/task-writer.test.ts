@@ -4,6 +4,18 @@ vi.mock("../src/config.js", () => ({
   config: {
     instanceId: "test-instance",
     reposBasePath: "/home/magnus/repos",
+    allowedRepos: [
+      "munin-memory",
+      "hugin",
+      "heimdall",
+      "ratatoskr",
+      "skuld",
+      "mimir",
+      "fortnox-mcp",
+      "grimnir",
+      "verdandi",
+      "brokkr",
+    ],
     signingSecret: "",
     signingKeyId: "ratatoskr",
   },
@@ -65,6 +77,7 @@ describe("task-writer", () => {
     expect(content).toContain("**Reply-to:** telegram:12345");
     expect(content).toContain("### Prompt");
     expect(content).toContain("Fix the login bug");
+    expect(content).toContain("Working directory: /home/magnus/repos/heimdall");
     expect(tags).toEqual(["pending", "runtime:claude", "instance:test-instance"]);
   });
 
@@ -123,5 +136,81 @@ describe("task-writer", () => {
 
     // Should be slugified: lowercase, special chars replaced
     expect(taskId).toMatch(/^\d{8}-\d{6}-add-user-authentication-login-flow/);
+  });
+
+  it("should reject repo traversal before writing a task", async () => {
+    const munin = mockMunin();
+    await expect(
+      submitTask(
+        {
+          title: "Traversal",
+          prompt: "do something",
+          context: "repo:../../etc",
+          timeout: 300,
+          chatId: "1",
+        },
+        munin,
+      ),
+    ).rejects.toThrow(/Invalid repo context/);
+    expect(munin.write).not.toHaveBeenCalled();
+  });
+
+  it("should reject repo names with slash, whitespace, or header injection", async () => {
+    const cases = [
+      "repo:heimdall/api",
+      "repo:heimdall logs",
+      "repo:heimdall\n**Timeout:** 999999",
+    ];
+
+    for (const context of cases) {
+      const munin = mockMunin();
+      await expect(
+        submitTask(
+          {
+            title: "Bad context",
+            prompt: "do something",
+            context,
+            timeout: 300,
+            chatId: "1",
+          },
+          munin,
+        ),
+      ).rejects.toThrow(/Invalid repo context/);
+      expect(munin.write).not.toHaveBeenCalled();
+    }
+  });
+
+  it("should reject unknown repos before writing a task", async () => {
+    const munin = mockMunin();
+    await expect(
+      submitTask(
+        {
+          title: "Unknown repo",
+          prompt: "do something",
+          context: "repo:not-a-grimnir-repo",
+          timeout: 300,
+          chatId: "1",
+        },
+        munin,
+      ),
+    ).rejects.toThrow(/not allowed/);
+    expect(munin.write).not.toHaveBeenCalled();
+  });
+
+  it("should reject non-scratch, non-repo contexts before writing a task", async () => {
+    const munin = mockMunin();
+    await expect(
+      submitTask(
+        {
+          title: "Bad context",
+          prompt: "do something",
+          context: "scratch\n**Timeout:** 999999",
+          timeout: 300,
+          chatId: "1",
+        },
+        munin,
+      ),
+    ).rejects.toThrow(/Invalid task context/);
+    expect(munin.write).not.toHaveBeenCalled();
   });
 });
