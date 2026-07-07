@@ -12,6 +12,27 @@ function isInvalidPositiveInt(raw: string | undefined): boolean {
   return !Number.isFinite(n) || n <= 0;
 }
 
+const DEFAULT_ALLOWED_REPOS = [
+  "munin-memory",
+  "hugin",
+  "heimdall",
+  "ratatoskr",
+  "skuld",
+  "mimir",
+  "fortnox-mcp",
+  "grimnir",
+  "verdandi",
+  "brokkr",
+];
+
+function repoListEnv(raw: string | undefined): string[] {
+  const value = raw && raw.trim() ? raw : DEFAULT_ALLOWED_REPOS.join(",");
+  return value
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 export const config = {
   port: parseInt(process.env.PORT || "3034"),
   host: process.env.HOST || "127.0.0.1",
@@ -28,6 +49,7 @@ export const config = {
   maxPollDurationMs: parseInt(process.env.MAX_POLL_DURATION_MS || "7200000"),
   instanceId: process.env.RATATOSKR_INSTANCE_ID || "default",
   reposBasePath: process.env.REPOS_BASE_PATH || "/home/magnus/repos",
+  allowedRepos: repoListEnv(process.env.RATATOSKR_ALLOWED_REPOS),
   sendApiKey: process.env.RATATOSKR_SEND_API_KEY || "",
   signingSecret: process.env.RATATOSKR_SIGNING_SECRET || "",
   signingKeyId: process.env.RATATOSKR_SIGNING_KEY_ID || "ratatoskr",

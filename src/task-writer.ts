@@ -26,12 +26,28 @@ function generateTaskId(title: string): string {
   return `${date}-${time}-${slugify(title)}`;
 }
 
-function resolveWorkingDirectory(context: string): string | null {
-  const match = context.match(/^repo:(.+)$/);
-  if (match) {
-    return `${config.reposBasePath}/${match[1]}`;
+const SAFE_REPO_NAME = /^[a-z0-9][a-z0-9-]*$/;
+
+function validateRepoContext(context: string): string | null {
+  if (context === "scratch") return null;
+
+  if (!context.startsWith("repo:")) {
+    throw new Error(`Invalid task context: ${JSON.stringify(context)}`);
   }
-  return null;
+
+  const repoName = context.slice("repo:".length);
+  if (!SAFE_REPO_NAME.test(repoName)) {
+    throw new Error(`Invalid repo context: ${JSON.stringify(context)}`);
+  }
+  if (!config.allowedRepos.includes(repoName)) {
+    throw new Error(`Repo is not allowed for Ratatoskr tasks: ${repoName}`);
+  }
+  return repoName;
+}
+
+function resolveWorkingDirectory(context: string): string | null {
+  const repoName = validateRepoContext(context);
+  return repoName ? `${config.reposBasePath}/${repoName}` : null;
 }
 
 interface FormattedTask {
