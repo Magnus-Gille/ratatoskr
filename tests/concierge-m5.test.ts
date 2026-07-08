@@ -93,6 +93,7 @@ describe("triage via the M5 gateway (issue #31)", () => {
     const body = JSON.parse(init.body);
     expect(body.taskType).toBe("triage");
     expect(body.modelId).toBe("qwen3-30b-instruct");
+    expect(body.delegatorModelId).toBe("claude-haiku-4-5-20251001");
     expect(body.maxTokens).toBe(1024);
     expect(body.prompt).toContain("what's running?");
     expect(body.systemPrompt).toContain("concierge");
