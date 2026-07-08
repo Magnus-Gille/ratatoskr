@@ -1,7 +1,7 @@
 # Ratatoskr Status
 
-**Last session:** 2026-07-07 (Codex) — ratatoskr#36 repo-context hardening PR #37
-**Branch:** codex/validate-repo-context (PR #37 open; deploy pending)
+**Last session:** 2026-07-08 (Codex close) — ratatoskr#36 repo-context hardening PR #37 merged
+**Branch:** main
 
 ## Completed This Session (2026-07-07) — ratatoskr#36 repo-context hardening
 
@@ -13,8 +13,9 @@ Added a task-writer guard for `repo:<name>` contexts before any Hugin task is wr
 - Covers both `/repo` command submissions and concierge/LLM-produced `ready.task.context`, because
   both flow through `submitTask`.
 
+PR #37 merged as `356ec3e` after local test/build validation, M5 review, and green GitHub checks.
+
 ### Pending / next
-- Merge PR #37 after CI/review.
 - Deploy to huginmunin after merge, then exercise `/repo heimdall ...` and a rejected traversal case.
 
 ## Completed This Session (2026-06-24) — autonomous, 4 PRs merged + deployed
