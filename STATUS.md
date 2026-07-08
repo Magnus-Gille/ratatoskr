@@ -1,7 +1,35 @@
 # Ratatoskr Status
 
-**Last session:** 2026-07-08 (Codex) — Ratatoskr main deployed and marker repaired
+**Last session:** 2026-07-08 (Codex) — `/repo` hardening live-validated
 **Branch:** main
+
+## Completed This Session (2026-07-08) — `/repo` hardening live validation
+
+Validated the deployed `/repo` command path on `huginmunin` using Ratatoskr's production built
+modules, real `.env`, and real Munin target. The synthetic Telegram update used the actual
+`createBot` command handler with a local Bot API interceptor, so no external Telegram message was
+sent.
+
+- Accepted case: `/repo heimdall ...` created
+  `tasks/20260708-180247-ratatoskr-command-handler-live`, then the validator immediately changed it
+  to `cancelled` to avoid execution.
+- Accepted task evidence: content includes `**Context:** repo:heimdall`, signed
+  `Submitted by: ratatoskr`, and `Working directory: /home/magnus/repos/heimdall`.
+- Rejected traversal case: `/repo ../../etc ...` raised
+  `Invalid repo context: "repo:../../etc"` and replied `Error submitting task. Check logs.`
+- Rejected header-injection case: `/repo heimdall\n**Timeout:** 999999 ...` raised
+  `Invalid repo context: "repo:heimdall\n**Timeout:**"` and replied `Error submitting task. Check logs.`
+- Munin audit evidence after the command-handler probe shows exactly one task write and one immediate
+  cancellation update, both for the accepted task; no task write for either rejected case.
+- Live health after validation: `ratatoskr.service` active, `/health` returns `status:"ok"`,
+  `bot_connected:true`, `active_polls:0`; Hugin `/health` reports `current_task:null` and
+  `queue_depth:0`.
+
+### Pending / next
+
+- Triage the existing npm audit findings separately; do not mix that with repo-context validation.
+- Consider improving the user-facing rejection reply later; it is currently generic by design
+  (`Error submitting task. Check logs.`), while the precise reason is logged server-side.
 
 ## Completed This Session (2026-07-08) — production marker repair + main deploy
 
@@ -23,8 +51,7 @@ Deployed via `/Users/magnus/repos/grimnir/scripts/deploy.sh ratatoskr`.
 
 ### Pending / next
 
-- Exercise `/repo heimdall ...` and a rejected traversal case for the earlier repo-context hardening.
-- Triage the existing npm audit findings separately; do not mix that with deploy-marker repair.
+- Completed live `/repo` validation on 2026-07-08; npm audit findings remain separate follow-up work.
 
 ## Completed This Session (2026-07-07) — ratatoskr#36 repo-context hardening
 
@@ -39,8 +66,7 @@ Added a task-writer guard for `repo:<name>` contexts before any Hugin task is wr
 PR #37 merged as `356ec3e` after local test/build validation, M5 review, and green GitHub checks.
 
 ### Pending / next
-- Deployed to huginmunin on 2026-07-08; still exercise `/repo heimdall ...` and a rejected traversal
-  case.
+- Deployed and live-validated on huginmunin on 2026-07-08.
 
 ## Completed This Session (2026-06-24) — autonomous, 4 PRs merged + deployed
 
