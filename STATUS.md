@@ -1,7 +1,30 @@
 # Ratatoskr Status
 
-**Last session:** 2026-07-08 (Codex close) — ratatoskr#36 repo-context hardening PR #37 merged
+**Last session:** 2026-07-08 (Codex) — Ratatoskr main deployed and marker repaired
 **Branch:** main
+
+## Completed This Session (2026-07-08) — production marker repair + main deploy
+
+Grimnir validation found Ratatoskr healthy but missing its `.deployed-commit` marker on
+`huginmunin`, so Heimdall/Grimnir could not prove what rsync deployment was live. Local `main` was
+clean at `ce3fc5d` (`feat: pass M5 triage delegator model (#39)`), and GitHub CI for that exact SHA
+had passed.
+
+Deployed via `/Users/magnus/repos/grimnir/scripts/deploy.sh ratatoskr`.
+
+- Remote marker: `/home/magnus/repos/ratatoskr/.deployed-commit` =
+  `ce3fc5d06af6f12320906fc2607c11e966e40a14`.
+- Live service: `ratatoskr.service` is active.
+- Health: `/health` returns `status:"ok"`, `service:"ratatoskr"`, `bot_connected:true`,
+  `active_polls:0`.
+- Follow-up Grimnir validation: **7 ok, 0 issues, 0 warnings**.
+- Deploy caveat: npm audit still reports existing dependency issues (local: 7 total, production:
+  3 moderate); this was not changed during the marker repair.
+
+### Pending / next
+
+- Exercise `/repo heimdall ...` and a rejected traversal case for the earlier repo-context hardening.
+- Triage the existing npm audit findings separately; do not mix that with deploy-marker repair.
 
 ## Completed This Session (2026-07-07) — ratatoskr#36 repo-context hardening
 
@@ -16,7 +39,8 @@ Added a task-writer guard for `repo:<name>` contexts before any Hugin task is wr
 PR #37 merged as `356ec3e` after local test/build validation, M5 review, and green GitHub checks.
 
 ### Pending / next
-- Deploy to huginmunin after merge, then exercise `/repo heimdall ...` and a rejected traversal case.
+- Deployed to huginmunin on 2026-07-08; still exercise `/repo heimdall ...` and a rejected traversal
+  case.
 
 ## Completed This Session (2026-06-24) — autonomous, 4 PRs merged + deployed
 
