@@ -300,6 +300,7 @@ async function triageViaM5(
         systemPrompt: systemContent,
         taskType: "triage",
         modelId: config.triageModel,
+        delegatorModelId: config.conciergeModel,
         maxTokens: 1024,
         // No frontierModelId: ratatoskr owns its own Anthropic fallback.
         verifier: { type: "matches", pattern: TRIAGE_VERIFIER_PATTERN },
