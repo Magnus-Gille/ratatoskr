@@ -120,6 +120,50 @@ notify_telegram "ping from laptop over tailnet 🐿️"
 
 ---
 
+## Send from the Pi even when the service is stopped
+
+The deployed helper reads the trusted project `.env` and calls Telegram's Bot
+API directly, so it does not depend on the long-poll bot or HTTP listener being
+up:
+
+```bash
+cd /home/magnus/repos/ratatoskr
+./scripts/ratatoskr send "unattended job finished"
+```
+
+It sends to the first `TELEGRAM_ALLOWED_USERS` entry by default. Set
+`RATATOSKR_CHAT_ID` in `.env` when a different allowlisted destination should be
+the operational default; an ambient `RATATOSKR_CHAT_ID` overrides the file for a
+one-off destination. The helper reads only those three scalar values from
+the systemd-compatible env file; it does not source or export the other secrets.
+The bot-token URL is passed to curl over stdin, keeping the token out of output,
+the process table, and curl's inherited environment. Successful Telegram
+response bodies are suppressed; safe error descriptions are shown.
+
+For an authenticated HTTP call from the Pi, use the configured bind address —
+the production service is tailnet-bound, so a hardcoded loopback URL is stale:
+
+```bash
+(
+  set -a; source /home/magnus/repos/ratatoskr/.env; set +a
+  curl --fail --silent --show-error \
+    --request POST "http://${HOST:-127.0.0.1}:${PORT:-3034}/api/send" \
+    --header "Authorization: Bearer $RATATOSKR_SEND_API_KEY" \
+    --header 'Content-Type: application/json' \
+    --data "{\"chat_id\":${TELEGRAM_ALLOWED_USERS%%,*},\"text\":\"service is live\"}"
+)
+```
+
+If Telegram is unavailable, the non-interactive email fallback is Himalaya. It
+needs an explicit sender because the account does not inject one automatically:
+
+```bash
+printf 'From: magnus@gille.ai\nTo: <recipient>\nSubject: Ratatoskr fallback\n\n%s\n' \
+  "unattended job finished" | himalaya -a gille message send
+```
+
+---
+
 ## Bind resilience (decouples the bot from the tailnet)
 
 So a tailnet outage can't crash-loop the whole process when the Tailscale IP is
