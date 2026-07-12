@@ -1,7 +1,47 @@
 # Ratatoskr Status
 
-**Last session:** 2026-07-08 (Codex) — `/repo` hardening live-validated
+**Last session:** 2026-07-13 (Codex) — autonomous issue sweep, five PRs merged and deployed
 **Branch:** main
+
+## Completed This Session (2026-07-13) — issue sweep + Claude-reviewed deployment
+
+Imported the Claude-facing project guidance for Codex and completed every open
+Ratatoskr issue that had a concrete autonomous fix. Each implementation used an
+isolated worktree/branch, a draft PR, GitHub Actions, and iterative Claude Opus
+review before squash merge:
+
+- **PR #41** (`c1ff58e`) — added byte-identical `AGENTS.md` guidance plus a
+  regression test that prevents drift from `CLAUDE.md`.
+- **Issue #26 / PR #43** (`1f959e1`) — added `scripts/ratatoskr send`, which
+  works when the service is stopped, parses only required systemd env scalars,
+  keeps the bot token out of argv/environment/output, bounds retries/time, and
+  documents the tailnet and explicit-account Himalaya paths.
+- **Issue #1 / PR #42** (`c82e25b`) — completed Telegram document handling for
+  bounded PDF/TXT/Markdown/CSV/JSON files. Documents stay attached through a
+  10-minute clarification loop, are persisted privately for Hugin ready tasks,
+  and get cleanup/30-day retention; cloud document reading can be disabled.
+- **Issue #40 / PR #44** (`31b62a4`) — added the authenticated durable reminder
+  API (create/list/status/cancel), fsynced atomic persistence, per-chat
+  idempotency, bounded queue/timeouts, explicit at-most-once attempt semantics,
+  corruption quarantine, restart recovery, and content-blind health metrics.
+- **PR #45** — fixed the deployment provenance regression discovered during
+  rollout. Remote deploys require a clean exact Git source; in-place Pi deploys
+  require explicit `DEPLOY_COMMIT`; stale markers are removed before mutation
+  and the new marker is written only after restart/status succeeds. Behavioral
+  fake-fleet tests cover both paths and failure guards.
+
+Final combined verification: TypeScript clean, guidance byte-identical, GitHub
+Actions green for every PR, and the complete local suite green. Production on
+`huginmunin` is active with `bot_connected:true`, reminder counts 0/0, reminder
+store mode `0600`, authenticated reminder listing healthy, and `.deployed-commit`
+matching the deployed main revision.
+
+### Remaining
+
+- Open issue #4 is an intentionally ongoing operational checklist for *future*
+  private repos. It needs a concrete repo/collaborator target, so it was left open.
+- Existing dependency audit findings remain separate: 7 total locally and 3
+  moderate production findings on the Pi.
 
 ## Completed This Session (2026-07-08) — `/repo` hardening live validation
 
