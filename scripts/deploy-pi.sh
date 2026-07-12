@@ -10,6 +10,7 @@ DEPLOY_USER="${DEPLOY_USER:-magnus}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 REMOTE_DIR="/home/$DEPLOY_USER/repos/ratatoskr"
+REQUESTED_COMMIT="${DEPLOY_COMMIT:-}"
 
 # Detect if we're already on the Pi
 IS_LOCAL=false
@@ -23,12 +24,47 @@ if [ -z "$PI_HOST" ] || [ "$PI_HOST" = "local" ]; then
   fi
 fi
 
+if [ "$IS_LOCAL" = true ]; then
+  # The Pi's .git is intentionally excluded from laptop rsync deploys and may
+  # be stale forever. Never infer provenance from it: the caller/Hugin task must
+  # pass the source SHA that produced the files being deployed in place.
+  DEPLOY_COMMIT="$REQUESTED_COMMIT"
+  if [ -z "$DEPLOY_COMMIT" ]; then
+    echo "ERROR: local deploy requires DEPLOY_COMMIT=<source-sha>" >&2
+    exit 1
+  fi
+else
+  GIT_COMMIT="$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || true)"
+  if [ -z "$GIT_COMMIT" ]; then
+    echo "ERROR: remote deploy requires a Git source checkout" >&2
+    exit 1
+  fi
+  if [ -n "$(git -C "$PROJECT_DIR" status --porcelain --untracked-files=normal)" ]; then
+    echo "ERROR: refusing to deploy a dirty working tree" >&2
+    exit 1
+  fi
+  if [ -n "$REQUESTED_COMMIT" ] && [ "$REQUESTED_COMMIT" != "$GIT_COMMIT" ]; then
+    echo "ERROR: DEPLOY_COMMIT does not match the checked-out HEAD" >&2
+    exit 1
+  fi
+  DEPLOY_COMMIT="$GIT_COMMIT"
+fi
+
+if [[ ! "$DEPLOY_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "ERROR: DEPLOY_COMMIT must be a full 40-character lowercase Git SHA" >&2
+  exit 1
+fi
+
 echo "==> Building TypeScript..."
 cd "$PROJECT_DIR"
 npm run build
 
 if [ "$IS_LOCAL" = true ]; then
   echo "==> Local deploy (already on Pi)"
+
+  # A deployment in progress must never retain a stale marker. The new marker
+  # is written only after the restart/status check succeeds.
+  rm -f "$PROJECT_DIR/.deployed-commit"
 
   echo "==> Installing production dependencies..."
   npm install --omit=dev
@@ -49,14 +85,21 @@ if [ "$IS_LOCAL" = true ]; then
   echo "==> Restarting service..."
   sudo systemctl restart ratatoskr && sleep 2 && sudo systemctl status ratatoskr --no-pager
 
+  printf '%s\n' "$DEPLOY_COMMIT" > "$PROJECT_DIR/.deployed-commit"
+
 else
   REMOTE="$DEPLOY_USER@$PI_HOST"
+
+  # Remove stale provenance before changing code. A failed deployment remains
+  # visibly unmarked instead of falsely claiming either the old or new SHA.
+  ssh "$REMOTE" "rm -f '$REMOTE_DIR/.deployed-commit'"
 
   echo "==> Syncing to $REMOTE:$REMOTE_DIR..."
   rsync -av --delete \
     --exclude='node_modules/' \
     --exclude='.git/' \
     --exclude='.env' \
+    --exclude='.deployed-commit' \
     --exclude='tests/' \
     --exclude='.DS_Store' \
     "$PROJECT_DIR/" "$REMOTE:$REMOTE_DIR/"
@@ -77,6 +120,10 @@ else
 
   echo "==> Restarting service..."
   ssh "$REMOTE" "sudo systemctl restart ratatoskr && sleep 2 && sudo systemctl status ratatoskr --no-pager"
+
+  echo "==> Recording deployed commit $DEPLOY_COMMIT..."
+  printf '%s\n' "$DEPLOY_COMMIT" | \
+    ssh "$REMOTE" "cat > '$REMOTE_DIR/.deployed-commit'"
 fi
 
 echo ""
