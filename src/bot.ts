@@ -13,6 +13,9 @@ import type { TrackedMessage } from "./message-tracker.js";
 import { downloadPhoto, downloadFile } from "./telegram-file.js";
 import { createTranscriber, checkVoiceLimits } from "./transcribe.js";
 import type { TriageStats } from "./triage-stats.js";
+import { checkDocument, prepareDocument } from "./document.js";
+import type { ConciergeDocument } from "./document.js";
+import { removeStoredDocument, storeDocument } from "./document-store.js";
 
 const TRIAGE_LOG_NAMESPACE = "ratatoskr/triage";
 
@@ -121,6 +124,16 @@ interface ConversationState {
   lastActivity: number;
 }
 
+interface PendingDocument {
+  document: ConciergeDocument;
+  localPath: string;
+}
+
+interface PendingDocumentState {
+  attachments: PendingDocument[];
+  lastActivity: number;
+}
+
 const CONVERSATION_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const MAX_HISTORY = 5;
 // Upper bound on a voice transcript before it's echoed / triaged / persisted, so
@@ -202,6 +215,56 @@ export function createBot(
   const conversations = new Map<string, ConversationState>();
   const messageTracker = new MessageTracker();
   const pendingReplyContext = new Map<string, TrackedMessage>();
+  const pendingDocuments = new Map<string, PendingDocumentState>();
+
+  async function discardPendingDocuments(
+    chatId: string,
+    fallback: PendingDocument[] = []
+  ): Promise<void> {
+    const pending = pendingDocuments.get(chatId);
+    pendingDocuments.delete(chatId);
+    const attachments = [...(pending?.attachments ?? []), ...fallback].filter(
+      (item, index, all) =>
+        all.findIndex((candidate) => candidate.localPath === item.localPath) === index
+    );
+    if (!attachments.length) return;
+    await Promise.all(
+      attachments.map((item) =>
+        removeStoredDocument(config.documentStorePath, item.localPath).catch((err) =>
+          console.error(`Failed to clean document ${item.localPath}:`, err)
+        )
+      )
+    );
+  }
+
+  async function activePendingDocuments(chatId: string): Promise<PendingDocument[]> {
+    const pending = pendingDocuments.get(chatId);
+    if (!pending) return [];
+    if (Date.now() - pending.lastActivity > CONVERSATION_TTL_MS) {
+      await discardPendingDocuments(chatId);
+      return [];
+    }
+    pending.lastActivity = Date.now();
+    return pending.attachments;
+  }
+
+  async function replacePendingDocuments(
+    chatId: string,
+    attachments: PendingDocument[]
+  ): Promise<void> {
+    const previous = pendingDocuments.get(chatId)?.attachments ?? [];
+    const replacementPaths = new Set(attachments.map((item) => item.localPath));
+    await Promise.all(
+      previous
+        .filter((item) => !replacementPaths.has(item.localPath))
+        .map((item) =>
+          removeStoredDocument(config.documentStorePath, item.localPath).catch((err) =>
+            console.error(`Failed to clean document ${item.localPath}:`, err)
+          )
+        )
+    );
+    pendingDocuments.set(chatId, { attachments, lastActivity: Date.now() });
+  }
 
   // Per-user concierge rate limit (issue #3): cap Haiku triage calls per chat so
   // a message burst can't fan out into unbounded API calls. A second 1-per-window
@@ -262,6 +325,7 @@ export function createBot(
     if (cached) {
       if (Date.now() - cached.lastActivity > CONVERSATION_TTL_MS) {
         conversations.delete(chatId);
+        await discardPendingDocuments(chatId);
         return [];
       }
       return cached.messages;
@@ -298,22 +362,37 @@ export function createBot(
     await deleteConversation(munin, chatId);
   }
 
-  // Shared concierge-result handler for the text, photo, and voice paths: submit
+  // Shared concierge-result handler for text, photo, voice, and document paths: submit
   // + ack + poll (ready), record + reply (clarify), or reply (answer).
   // `userHistoryText` is stored as the user turn when clarifying.
   async function handleTriageResult(
     ctx: Context,
     chatId: string,
     result: Awaited<ReturnType<typeof triage>>,
-    userHistoryText: string
+    userHistoryText: string,
+    attachments: PendingDocument[] = []
   ): Promise<void> {
     // Competence evidence (issue #27), fire-and-forget — see recordTriageEvidence.
     recordTriageEvidence(munin, triageStats, result);
 
     switch (result.action) {
       case "ready": {
+        if (attachments.length) pendingDocuments.delete(chatId);
+        else await discardPendingDocuments(chatId);
         await clearConversation(chatId);
-        const taskId = await submitTask({ ...result.task, chatId }, munin);
+        const attachmentNote = attachments.length
+          ? `\n\nAttached document${attachments.length === 1 ? "" : "s"} on this host:\n` +
+            attachments.map((item) => `- ${item.localPath}`).join("\n") +
+            "\nRead the local file(s) above as the authoritative source."
+          : "";
+        const taskId = await submitTask(
+          {
+            ...result.task,
+            prompt: result.task.prompt + attachmentNote,
+            chatId,
+          },
+          munin
+        );
         const duration = formatDuration(result.task.timeout);
         const ackSent = await ctx.reply(
           `Got it, submitting to ${result.task.context}. ~${duration}.`
@@ -343,6 +422,9 @@ export function createBot(
         break;
       }
       case "clarify": {
+        if (attachments.length) {
+          await replacePendingDocuments(chatId, attachments);
+        }
         await addToConversation(chatId, "user", userHistoryText);
         await addToConversation(chatId, "assistant", result.question);
         const sent = await ctx.reply(result.question);
@@ -353,6 +435,7 @@ export function createBot(
         break;
       }
       case "answer": {
+        await discardPendingDocuments(chatId, attachments);
         await clearConversation(chatId);
         const sent = await ctx.reply(result.reply);
         messageTracker.track(sent.message_id, {
@@ -567,8 +650,17 @@ Or just send a message and the concierge will triage it.`
           if (!(await withinConciergeRate(ctx, chatId))) return;
           const history = await getConversation(chatId);
           const muninContext = await gatherContext(munin);
-          const result = await triage(message, history, muninContext, replyCtx);
-          await handleTriageResult(ctx, chatId, result, message);
+          const attachments = await activePendingDocuments(chatId);
+          const result = await triage(
+            message,
+            history,
+            muninContext,
+            replyCtx,
+            undefined,
+            undefined,
+            attachments.map((item) => item.document)
+          );
+          await handleTriageResult(ctx, chatId, result, message, attachments);
         } catch (err) {
           console.error("Concierge error:", err);
           const reason = conciergeErrorReason(err);
@@ -693,6 +785,85 @@ Or just send a message and the concierge will triage it.`
       await ctx.reply(
         `Couldn't process that voice message: ${reason}. Try text or /raw.`
       );
+    }
+  });
+
+  bot.on("message:document", async (ctx) => {
+    if (!isAllowed(ctx)) return;
+
+    const chatId = ctx.chat.id.toString();
+    latestCtx.set(chatId, ctx);
+    if (!config.documentsEnabled) {
+      await ctx.reply("Document reading is disabled — send text or use /raw.");
+      return;
+    }
+
+    if (!(await withinConciergeRate(ctx, chatId))) return;
+
+    const telegramDocument = ctx.message.document;
+    const unsupported = checkDocument(
+      telegramDocument.file_name,
+      telegramDocument.mime_type,
+      telegramDocument.file_size
+    );
+    if (unsupported) {
+      await ctx.reply(unsupported);
+      return;
+    }
+
+    let storedPath: string | null = null;
+    try {
+      const downloaded = await downloadFile(
+        ctx.api,
+        telegramDocument.file_id,
+        telegramDocument.mime_type ?? "application/octet-stream"
+      );
+      const document = prepareDocument(
+        downloaded,
+        telegramDocument.file_name,
+        telegramDocument.mime_type
+      );
+      const localPath = await storeDocument(
+        config.documentStorePath,
+        downloaded,
+        telegramDocument.file_name
+      );
+      storedPath = localPath;
+      const attachments = [{ document, localPath }];
+      const caption = ctx.message.caption || "";
+      const repliedTo = ctx.message.reply_to_message;
+      const tracked = repliedTo
+        ? messageTracker.lookup(repliedTo.message_id)
+        : null;
+      const replyCtx = buildReplyContext(repliedTo, tracked);
+      const history = await getConversation(chatId);
+      const muninContext = await gatherContext(munin);
+      const result = await triage(
+        caption,
+        history,
+        muninContext,
+        replyCtx,
+        undefined,
+        undefined,
+        [document]
+      );
+      const historyEntry = caption
+        ? `[sent document ${document.title} at ${localPath} with caption: "${caption}"]`
+        : `[sent document ${document.title} at ${localPath}]`;
+      // Ready tasks retain the file for Hugin; clarification state owns it until
+      // expiry. Answer cleanup happens inside handleTriageResult.
+      if (result.action !== "answer") storedPath = null;
+      await handleTriageResult(ctx, chatId, result, historyEntry, attachments);
+      storedPath = null;
+    } catch (err) {
+      if (storedPath) {
+        await removeStoredDocument(config.documentStorePath, storedPath).catch(
+          (cleanupErr) => console.error(`Failed to clean document ${storedPath}:`, cleanupErr)
+        );
+      }
+      console.error("Document handler error:", err);
+      const reason = conciergeErrorReason(err);
+      await ctx.reply(`Couldn't process that document: ${reason}`);
     }
   });
 

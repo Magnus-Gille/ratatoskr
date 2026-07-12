@@ -3,6 +3,7 @@ import { config } from "./config.js";
 import { MuninClient } from "./munin-client.js";
 import { RATATOSKR_SOUL } from "./soul.js";
 import type { TrackedMessage } from "./message-tracker.js";
+import type { ConciergeDocument } from "./document.js";
 
 export type TriageAction = "ready" | "clarify" | "answer";
 
@@ -89,6 +90,11 @@ When the user sends an image (screenshot, photo, etc.):
 - If it's a bug/error screenshot with a clear ask: classify as "ready" and describe what the image shows in the enriched task prompt. The Hugin agent cannot see the image, so your description must be detailed enough to act on.
 - If the image is ambiguous and no caption explains intent: classify as "clarify" and ask what they want done with it.
 - If you can answer directly from the image (e.g. "what does this error mean?"): classify as "answer".
+
+When the user sends a document:
+- Read it and use the caption as the requested action.
+- If the caption is empty or ambiguous, summarize what the document is and ask what they want done.
+- Hugin cannot access the original attachment. For a "ready" task, include all details from the document that the downstream agent needs in the enriched prompt.
 
 If a Reply Context section is present, the user is responding to a specific previous message. Use that context to understand what they're referring to — e.g. "run this again" means resubmit the referenced task, "that's wrong" means the referenced result needs correction.
 
@@ -391,7 +397,8 @@ export async function triage(
   muninContext: string,
   replyContext?: TrackedMessage | null,
   images?: Array<{ base64: string; mediaType: string }>,
-  deps?: { fetchImpl?: typeof fetch }
+  deps?: { fetchImpl?: typeof fetch },
+  documents?: ConciergeDocument[]
 ): Promise<TriageResult> {
   const systemContent = buildSystemContent(muninContext, replyContext);
   const attempts: TriageAttempt[] = [];
@@ -399,7 +406,7 @@ export async function triage(
   // M5 gateway path (issue #31): text-only triage classification. Image triage
   // stays on Anthropic — vision on the local /delegate lane is untested, and a
   // guaranteed-failing attempt would just add a timeout to every screenshot.
-  if (config.triageUrl && !images?.length) {
+  if (config.triageUrl && !images?.length && !documents?.length) {
     const startedAt = Date.now();
     try {
       const m5 = await triageViaM5(
@@ -470,15 +477,47 @@ export async function triage(
     }
   }
 
-  // Add the text (caption or empty prompt)
-  userContent.push({ type: "text", text: message || "What's in this image?" });
+  if (documents?.length) {
+    for (const document of documents) {
+      userContent.push(
+        document.kind === "pdf"
+          ? {
+              type: "document",
+              source: {
+                type: "base64",
+                media_type: "application/pdf",
+                data: document.base64,
+              },
+              title: document.title,
+            }
+          : {
+              type: "document",
+              source: {
+                type: "text",
+                media_type: "text/plain",
+                data: document.text,
+              },
+              title: document.title,
+            }
+      );
+    }
+  }
+
+  // Add the caption or a media-specific fallback prompt.
+  const fallbackPrompt = documents?.length
+    ? "Summarize this document, then ask what I want done with it."
+    : "What's in this image?";
+  userContent.push({ type: "text", text: message || fallbackPrompt });
 
   const messages: Anthropic.MessageParam[] = [
     ...conversationHistory.map((m) => ({
       role: m.role as "user" | "assistant",
       content: m.content,
     })),
-    { role: "user", content: images?.length ? userContent : message },
+    {
+      role: "user",
+      content: images?.length || documents?.length ? userContent : message,
+    },
   ];
 
   const startedAt = Date.now();
