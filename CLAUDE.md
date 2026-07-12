@@ -77,6 +77,14 @@ TELEGRAM_BOT_TOKEN=<token> TELEGRAM_ALLOWED_USERS=<user_id> MUNIN_API_KEY=<key> 
 
 Default host: `huginmunin.local`.
 
+The deploy script records the exact source SHA in `.deployed-commit` only after
+the restart/status check passes, so Heimdall/Grimnir can prove which revision is
+live. Laptop/remote deploys refuse a dirty tree. The Pi's excluded `.git` is
+stale, so in-place deploys must use
+`DEPLOY_COMMIT=<source-sha> ./scripts/deploy-pi.sh local`. The old marker is
+removed before mutation; a failed mid-deploy is deliberately unmarked rather
+than falsely claiming either revision.
+
 ### Operational notifications
 
 On the Pi, `./scripts/ratatoskr send <text>` reads the deployed `.env` and calls
