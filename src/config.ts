@@ -53,6 +53,12 @@ export const config = {
   reposBasePath: process.env.REPOS_BASE_PATH || "/home/magnus/repos",
   allowedRepos: repoListEnv(process.env.RATATOSKR_ALLOWED_REPOS),
   sendApiKey: process.env.RATATOSKR_SEND_API_KEY || "",
+  reminderStorePath:
+    process.env.RATATOSKR_REMINDER_STORE ||
+    path.join(
+      process.env.HOME || "/home/magnus",
+      ".local/state/ratatoskr/reminders.json"
+    ),
   signingSecret: process.env.RATATOSKR_SIGNING_SECRET || "",
   signingKeyId: process.env.RATATOSKR_SIGNING_KEY_ID || "ratatoskr",
   consolidationPollMs: parseInt(
