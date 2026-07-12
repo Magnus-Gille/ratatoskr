@@ -261,6 +261,49 @@ describe("concierge", () => {
       expect(textBlock.text).toBe("What's in this image?");
     });
 
+    it("sends PDF and text documents as Anthropic document blocks", async () => {
+      mockCreate.mockResolvedValue({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ action: "answer", reply: "Document summarized." }),
+          },
+        ],
+      });
+
+      await triage("compare these", [], "No context", null, undefined, undefined, [
+        { kind: "pdf", base64: "pdfdata", title: "report.pdf" },
+        { kind: "text", text: "plain contents", title: "notes.txt" },
+      ]);
+
+      const callArgs = mockCreate.mock.calls[0][0];
+      const content = callArgs.messages.at(-1).content;
+      expect(content[0]).toMatchObject({
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: "pdfdata" },
+        title: "report.pdf",
+      });
+      expect(content[1]).toMatchObject({
+        type: "document",
+        source: { type: "text", media_type: "text/plain", data: "plain contents" },
+        title: "notes.txt",
+      });
+      expect(content[2]).toEqual({ type: "text", text: "compare these" });
+    });
+
+    it("uses the document clarification prompt when no caption is present", async () => {
+      mockCreate.mockResolvedValue({
+        content: [
+          { type: "text", text: JSON.stringify({ action: "clarify", question: "What should I do?" }) },
+        ],
+      });
+      await triage("", [], "No context", null, undefined, undefined, [
+        { kind: "text", text: "contents", title: "notes.txt" },
+      ]);
+      const content = mockCreate.mock.calls[0][0].messages.at(-1).content;
+      expect(content.at(-1).text).toContain("Summarize this document");
+    });
+
     it("should send plain string message when no images provided", async () => {
       mockCreate.mockResolvedValue({
         content: [

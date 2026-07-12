@@ -327,6 +327,23 @@ describe("triage via the M5 gateway (issue #31)", () => {
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
+  it("skips the M5 path entirely for document triage", async () => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    anthropicAnswers("I read the document.");
+    const result = await triage(
+      "summarize",
+      [],
+      "No context",
+      null,
+      undefined,
+      { fetchImpl },
+      [{ kind: "text", text: "document contents", title: "notes.txt" }]
+    );
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(result.meta.backend).toBe("anthropic");
+    expect(result.meta.fallback).toBe(false);
+  });
+
   // Codex review findings (PR #32): enforce the gateway outcome contract and
   // never leak raw model output (which can echo user message content) into
   // persisted attempt records.

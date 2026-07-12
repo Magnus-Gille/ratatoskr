@@ -25,7 +25,7 @@ Part of the Grimnir system: **Munin** (memory), **Hugin** (task dispatcher), **R
 ### Components
 
 - `src/index.ts` — Express app (health endpoint + registers `/api/send` route) + bot startup + poll recovery
-- `src/bot.ts` — Telegram bot setup, message/photo/voice handlers, allowlist, conversation persistence; shared `handleTriageResult` drives submit/clarify/answer for all input types, and fire-and-forget logs each triage decision to Munin (`ratatoskr/triage`) + records it in `TriageStats` (issue #27)
+- `src/bot.ts` — Telegram bot setup, message/photo/voice/document handlers, allowlist, conversation persistence; shared `handleTriageResult` drives submit/clarify/answer for all input types, and fire-and-forget logs each triage decision to Munin (`ratatoskr/triage`) + records it in `TriageStats` (issue #27)
 - `src/concierge.ts` — Intent triage (multimodal: text + images) + result summarization. Text triage classification routes through the M5 gateway's `POST /delegate` when `RATATOSKR_TRIAGE_URL` is set (issue #31) — the gateway records each attempt in the Pillar-2 capability ledger — with graceful, visible fallback to the Anthropic Haiku path on any gateway error/timeout; image triage and summarization stay on Anthropic. `triage()` returns a `meta` field (serving backend, model, fallback flag, per-attempt routing outcomes, latency, tokens) alongside the action (issues #27/#31)
 - `src/triage-stats.ts` — `TriageStats`: in-memory (process-lifetime) tally of triage decisions by action + serving backend + M5 fallbacks + avg latency/tokens, read by `/heimdall.json` for real competence metrics (issues #27/#31)
 - `src/soul.ts` — `RATATOSKR_SOUL` constant defining Ratatoskr's voice/personality for all Telegram output
@@ -37,6 +37,8 @@ Part of the Grimnir system: **Munin** (memory), **Hugin** (task dispatcher), **R
 - `src/telegram-util.ts` — Result formatting: metadata extraction, markdown stripping, summarization pipeline, truncation
 - `src/telegram-file.ts` — Download media from Telegram's file API: `downloadPhoto` (base64 image) + `downloadFile` (raw bytes for voice/audio, issue #1)
 - `src/transcribe.ts` — `createTranscriber`: posts audio to a local OpenAI-compatible `/v1/audio/transcriptions` Whisper endpoint (config-gated, audio stays on-box) and returns the transcript (issue #1)
+- `src/document.ts` — validates PDF/text document type and size, converts Telegram downloads into bounded Anthropic document blocks, and rejects invalid UTF-8 (issue #1)
+- `src/document-store.ts` — persists original Telegram document bytes under a private Pi-local path that downstream Hugin tasks can read; cleans non-task files and prunes ready-task attachments after 30 days (issue #1)
 - `src/message-tracker.ts` — In-memory tracker mapping outbound Telegram message IDs to context (for reply awareness)
 - `src/message-aggregator.ts` — Debounce rapid Telegram message fragments into single logical messages
 - `src/rate-limiter.ts` — `SlidingWindowRateLimiter`: per-key sliding-window limiter (pure, time-injectable). Caps concierge/Haiku triage calls per chat so a message burst can't fan out into unbounded API calls (issue #3)
@@ -125,6 +127,8 @@ see **`docs/remote-send.md`** (bind `HOST` to the Tailscale IP + set
 | `RATATOSKR_TRANSCRIBE_TOKEN` | — | Optional Bearer token if the local transcription endpoint is auth-gated. |
 | `RATATOSKR_TRANSCRIBE_ALLOW_REMOTE` | `false` | Opt-in to a non-local transcription endpoint (suppresses the "audio off-box" startup warning). |
 | `RATATOSKR_VOICE_MAX_DURATION_S` | `300` | Reject voice notes longer than this (seconds) before downloading/transcribing. |
+| `RATATOSKR_DOCUMENTS_ENABLED` | `true` | Set `false` to disable document uploads. When enabled, document contents are sent to Anthropic for concierge reading. |
+| `RATATOSKR_DOCUMENT_STORE` | `~/.local/state/ratatoskr/documents` | Private Pi-local attachment directory; Hugin tasks receive the stored path because they cannot access Telegram attachments. |
 | `RATATOSKR_TRIAGE_URL` | — | M5 gateway `POST /delegate` endpoint for triage classification (issue #31), e.g. `http://<m5-tailnet-ip>:8080/delegate`. Unset → triage stays on the Anthropic path exactly as before (feature off). |
 | `RATATOSKR_TRIAGE_MODEL` | `mellum` | Local model id pinned for M5 triage classification (pinned so the ledger's per-model dataset is controlled). Default `mellum` per issue #33 — beats `qwen3-30b-instruct` on accuracy (90% vs 84%), `ready` recall (88% vs 67%), and latency, with a smaller cold-swap window. |
 | `RATATOSKR_TRIAGE_API_KEY` | — | Owner-tier Bearer token for the gateway's `/delegate` route (owner-tier-only; without it every call 401s and falls back — warned at boot). |

@@ -1,3 +1,5 @@
+import path from "node:path";
+
 /** Parse an env var as a positive integer, falling back to `fallback` if it is
  *  missing, non-numeric, or ≤ 0. Keeps the runtime safe from a mistyped value. */
 function positiveIntEnv(raw: string | undefined, fallback: number): number {
@@ -87,6 +89,17 @@ export const config = {
     process.env.RATATOSKR_VOICE_MAX_DURATION_S,
     300
   ),
+  // Telegram documents are read by Anthropic's concierge, then persisted
+  // locally so a downstream Hugin task can access the original attachment.
+  documentsEnabled:
+    (process.env.RATATOSKR_DOCUMENTS_ENABLED || "true").toLowerCase() !==
+    "false",
+  documentStorePath:
+    process.env.RATATOSKR_DOCUMENT_STORE ||
+    path.join(
+      process.env.HOME || "/home/magnus",
+      ".local/state/ratatoskr/documents"
+    ),
   // M5 triage routing (issue #31). Points at the M5 gateway's POST /delegate
   // endpoint (e.g. http://<m5-tailnet-ip>:8080/delegate) so triage
   // classification runs on a local model and every attempt lands in the
