@@ -74,6 +74,14 @@ TELEGRAM_BOT_TOKEN=<token> TELEGRAM_ALLOWED_USERS=<user_id> MUNIN_API_KEY=<key> 
 
 Default host: `huginmunin.local`.
 
+### Operational notifications
+
+On the Pi, `./scripts/ratatoskr send <text>` reads the deployed `.env` and calls
+Telegram directly, so it works even when `ratatoskr.service` is stopped. For the
+authenticated HTTP path, use `http://${HOST:-127.0.0.1}:${PORT:-3034}/api/send`;
+production is bound to the Tailscale address, not loopback. See
+`docs/remote-send.md` for the exact recipe and the Himalaya email fallback.
+
 The Pi needs a `.env` file at `/home/magnus/repos/ratatoskr/.env`:
 ```
 TELEGRAM_BOT_TOKEN=<from BotFather>
@@ -104,6 +112,7 @@ see **`docs/remote-send.md`** (bind `HOST` to the Tailscale IP + set
 | `REPOS_BASE_PATH` | `/home/magnus/repos` | Base path for resolving `repo:<name>` context to filesystem paths |
 | `RATATOSKR_ALLOWED_REPOS` | Grimnir component repos | Comma-separated allowlist for `repo:<name>` task contexts. Invalid, unknown, path-like, or newline-containing repo contexts are rejected in `task-writer` before a Hugin task is written. |
 | `RATATOSKR_SEND_API_KEY` | — | Bearer token for `POST /api/send`. Mandatory when `HOST` is non-loopback (the endpoint is disabled otherwise); when set, enforced on **all** binds incl. loopback. See `docs/remote-send.md`. |
+| `RATATOSKR_CHAT_ID` | first `TELEGRAM_ALLOWED_USERS` entry | Optional default destination for `./scripts/ratatoskr send`; supports private and negative group/channel IDs. |
 | `RATATOSKR_SIGNING_SECRET` | — | HMAC-SHA256 secret for Hugin task submission signing (PR #5) |
 | `RATATOSKR_SIGNING_KEY_ID` | `ratatoskr` | Key ID advertised alongside signed task submissions |
 | `RATATOSKR_CONSOLIDATION_POLL_MS` | `120000` | Interval for polling Munin consolidation-worker health |

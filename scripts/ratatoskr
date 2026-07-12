@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+ENV_FILE="${RATATOSKR_ENV_FILE:-$PROJECT_DIR/.env}"
+CURL_BIN="${RATATOSKR_CURL_BIN:-curl}"
+
+usage() {
+  echo "Usage: ratatoskr send <text>" >&2
+  exit 2
+}
+
+if [[ ${1:-} != "send" ]]; then
+  usage
+fi
+shift
+MESSAGE="$*"
+
+if [[ $# -eq 0 || -z "${MESSAGE//[[:space:]]/}" ]]; then
+  usage
+fi
+
+if [[ ! -r "$ENV_FILE" ]]; then
+  echo "Ratatoskr env file is not readable: $ENV_FILE" >&2
+  exit 1
+fi
+
+# Read only the values this helper needs. EnvironmentFile is parsed by systemd,
+# not a shell; sourcing it would both execute substitutions and reject valid
+# unquoted values containing spaces. Bot tokens/chat IDs use a simple scalar
+# subset, with optional matching single/double quotes.
+read_env_value() {
+  local key="$1" line value=""
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
+    if [[ "$line" =~ ^[[:space:]]*${key}[[:space:]]*=(.*)$ ]]; then
+      value="${BASH_REMATCH[1]}"
+    fi
+  done < "$ENV_FILE"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  if [[ ${#value} -ge 2 ]]; then
+    if [[ ( "${value:0:1}" == '"' && "${value: -1}" == '"' ) ||
+          ( "${value:0:1}" == "'" && "${value: -1}" == "'" ) ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+  fi
+  printf '%s' "$value"
+}
+
+BOT_TOKEN="$(read_env_value TELEGRAM_BOT_TOKEN)"
+ALLOWED_USERS="$(read_env_value TELEGRAM_ALLOWED_USERS)"
+DEFAULT_CHAT_ID="$(read_env_value RATATOSKR_CHAT_ID)"
+CHAT_ID="${RATATOSKR_CHAT_ID:-${DEFAULT_CHAT_ID:-${ALLOWED_USERS%%,*}}}"
+CHAT_ID="${CHAT_ID//[[:space:]]/}"
+
+if [[ -z "$BOT_TOKEN" ]]; then
+  echo "TELEGRAM_BOT_TOKEN is missing from $ENV_FILE" >&2
+  exit 1
+fi
+if [[ ! "$BOT_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+  echo "TELEGRAM_BOT_TOKEN has an invalid format in $ENV_FILE" >&2
+  exit 1
+fi
+if [[ ! "$CHAT_ID" =~ ^-?[0-9]+$ ]]; then
+  echo "No valid chat id; set RATATOSKR_CHAT_ID or TELEGRAM_ALLOWED_USERS" >&2
+  exit 1
+fi
+if [[ ${#MESSAGE} -gt 4096 ]]; then
+  echo "Telegram text must be at most 4096 characters" >&2
+  exit 1
+fi
+
+RESPONSE_FILE="$(mktemp)"
+trap 'rm -f "$RESPONSE_FILE"' EXIT
+
+# Keep the bot token out of argv/process listings by feeding the URL through
+# curl's stdin config. The strict token validation above prevents config-line
+# injection. Bound unattended calls and retry transient connection failures.
+if printf 'url = "https://api.telegram.org/bot%s/sendMessage"\n' "$BOT_TOKEN" | \
+  "$CURL_BIN" \
+    --config - \
+    --fail-with-body \
+    --silent \
+    --show-error \
+    --connect-timeout 5 \
+    --max-time 20 \
+    --retry 2 \
+    --retry-connrefused \
+    --output "$RESPONSE_FILE" \
+    --request POST \
+    --data-urlencode "chat_id=${CHAT_ID}" \
+    --data-urlencode "text=$MESSAGE"; then
+  exit 0
+else
+  status=$?
+  [[ -s "$RESPONSE_FILE" ]] && cat "$RESPONSE_FILE" >&2
+  exit "$status"
+fi
