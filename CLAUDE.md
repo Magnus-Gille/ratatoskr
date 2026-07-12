@@ -44,6 +44,7 @@ Part of the Grimnir system: **Munin** (memory), **Hugin** (task dispatcher), **R
 - `src/rate-limiter.ts` — `SlidingWindowRateLimiter`: per-key sliding-window limiter (pure, time-injectable). Caps concierge/Haiku triage calls per chat so a message burst can't fan out into unbounded API calls (issue #3)
 - `src/auth.ts` — Bearer-token middleware for `POST /api/send` (timing-safe; fail-closed when bound non-loopback without a key)
 - `src/send-handler.ts` — `POST /api/send` route: `createSendHandler` (pure, DI'd handler — validation → allowlist → send → best-effort Heimdall echo) + `registerSendRoute` (wires auth → `express.json()` → handler in order). Extracted from `index.ts` as the testable seam (tested in `tests/send-handler.test.ts`). Accepts `{chat_id, text}` and/or `{chat_id, alert}` (issue #16)
+- `src/reminders.ts` — fsynced/atomic Pi-local reminder store and bounded delivery scheduler with restart quarantine, 90-day terminal retention, idempotency, and at-most-once attempt semantics; `src/reminder-handler.ts` exposes authenticated create/list/status/cancel routes (issue #40)
 - `src/alert.ts` — alert-bus support for `/api/send` (issue #16): `AlertEnvelope` type, `validateAlert` (rebuilds a clean allowlisted envelope from untrusted input), `renderAlertText` (severity header + body + links, self-bounded to Telegram's 4096 limit), `createHeimdallNotifier` (best-effort POST of the envelope to Heimdall's `/api/alerts` ingest)
 - `src/consolidation-health-poller.ts` — Poll Munin consolidation-worker health; Telegram alert on failure/recovery
 - `src/listen.ts` — Resilient HTTP listener bind: retry `EADDRNOTAVAIL` (Tailscale IP not yet assigned) instead of crash-looping the process
@@ -115,6 +116,7 @@ see **`docs/remote-send.md`** (bind `HOST` to the Tailscale IP + set
 | `RATATOSKR_ALLOWED_REPOS` | Grimnir component repos | Comma-separated allowlist for `repo:<name>` task contexts. Invalid, unknown, path-like, or newline-containing repo contexts are rejected in `task-writer` before a Hugin task is written. |
 | `RATATOSKR_SEND_API_KEY` | — | Bearer token for `POST /api/send`. Mandatory when `HOST` is non-loopback (the endpoint is disabled otherwise); when set, enforced on **all** binds incl. loopback. See `docs/remote-send.md`. |
 | `RATATOSKR_CHAT_ID` | first `TELEGRAM_ALLOWED_USERS` entry | Optional default destination for `./scripts/ratatoskr send`; supports private and negative group/channel IDs. |
+| `RATATOSKR_REMINDER_STORE` | `~/.local/state/ratatoskr/reminders.json` | Durable JSON store for scheduled reminders. Written atomically with mode `0600`; keep it outside the rsynced repo so deploys cannot delete it. |
 | `RATATOSKR_SIGNING_SECRET` | — | HMAC-SHA256 secret for Hugin task submission signing (PR #5) |
 | `RATATOSKR_SIGNING_KEY_ID` | `ratatoskr` | Key ID advertised alongside signed task submissions |
 | `RATATOSKR_CONSOLIDATION_POLL_MS` | `120000` | Interval for polling Munin consolidation-worker health |

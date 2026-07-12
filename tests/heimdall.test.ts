@@ -112,6 +112,7 @@ function validateDescriptor(obj: unknown): ValidateResult {
 const HEALTHY_STATE: DescriptorState = {
   botConnected: true,
   activePolls: 2,
+  reminders: { pending: 3, failed: 1 },
   triage: {
     total: 7,
     byAction: { ready: 3, clarify: 1, answer: 3 },
@@ -126,6 +127,7 @@ const HEALTHY_STATE: DescriptorState = {
 const DOWN_STATE: DescriptorState = {
   botConnected: false,
   activePolls: 0,
+  reminders: { pending: 0, failed: 0 },
   triage: {
     total: 0,
     byAction: { ready: 0, clarify: 0, answer: 0 },
@@ -275,6 +277,13 @@ describe("GET /heimdall.json — real status and metrics (issue #27)", () => {
     const botConnected = metrics.find((m) => m.key === "bot_connected");
     expect(activePolls?.value).toBe(2);
     expect(botConnected?.value).toBe(1);
+  });
+
+  it("exposes content-blind reminder counts", () => {
+    const metrics = buildHeimdallDescriptor(HEALTHY_STATE).metrics;
+    expect(metrics.find((m) => m.key === "pending_reminders")?.value).toBe(3);
+    expect(metrics.find((m) => m.key === "failed_reminders")?.value).toBe(1);
+    expect(JSON.stringify(metrics)).not.toContain("reminder text");
   });
 
   it("reflects live triage competence stats (decisions, latency, tokens)", () => {

@@ -10,6 +10,8 @@ import { recoverActivePolls } from "./recovery.js";
 import { ConsolidationHealthPoller } from "./consolidation-health-poller.js";
 import { attachBindResilience } from "./listen.js";
 import { TriageStats } from "./triage-stats.js";
+import { DurableReminderQueue } from "./reminders.js";
+import { registerReminderRoutes } from "./reminder-handler.js";
 
 validateConfig();
 
@@ -21,6 +23,12 @@ const munin = new MuninClient({
 const poller = new ResultPoller(munin);
 const triageStats = new TriageStats();
 const bot = createBot(munin, poller, triageStats);
+const reminders = new DurableReminderQueue({
+  storePath: config.reminderStorePath,
+  sendMessage: (chatId, text) => bot.api.sendMessage(chatId, text),
+});
+await reminders.initialize();
+reminders.start();
 const consolidationPoller = new ConsolidationHealthPoller(
   munin,
   bot.api,
@@ -35,6 +43,8 @@ app.get("/health", (_req, res) => {
     service: "ratatoskr",
     bot_connected: botConnected,
     active_polls: poller.activePollCount,
+    pending_reminders: reminders.counts().pending,
+    failed_reminders: reminders.counts().failed,
   });
 });
 
@@ -47,6 +57,7 @@ app.get("/heimdall.json", (_req, res) => {
       botConnected,
       activePolls: poller.activePollCount,
       triage: triageStats.snapshot(),
+      reminders: reminders.counts(),
     })
   );
 });
@@ -69,6 +80,13 @@ registerSendRoute(app, {
   sendApiKey: config.sendApiKey,
   host: config.host,
   notifyHeimdall,
+});
+
+registerReminderRoutes(app, {
+  queue: reminders,
+  allowedUsers: config.allowedUsers,
+  sendApiKey: config.sendApiKey,
+  host: config.host,
 });
 
 const server = app.listen(config.port, config.host, () => {
@@ -110,6 +128,7 @@ function shutdown(signal: string) {
   botConnected = false;
   poller.stopAll();
   consolidationPoller.stop();
+  reminders.stop();
   server.close(() => {
     console.log("Ratatoskr stopped.");
     process.exit(0);

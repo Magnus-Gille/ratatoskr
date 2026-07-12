@@ -12,11 +12,13 @@
  * Route must remain UNAUTHENTICATED — no RATATOSKR_SEND_API_KEY gate.
  */
 import type { TriageStatsSnapshot } from "./triage-stats.js";
+import type { ReminderCounts } from "./reminders.js";
 
 export interface DescriptorState {
   botConnected: boolean;
   activePolls: number;
   triage: TriageStatsSnapshot;
+  reminders: ReminderCounts;
 }
 
 export interface DescriptorMetric {
@@ -71,6 +73,22 @@ function buildMetrics(state: DescriptorState): DescriptorMetric[] {
       kind: "gauge",
       chart: true,
       value: state.activePolls,
+    },
+    {
+      key: "pending_reminders",
+      label: "Pending reminders",
+      unit: "",
+      kind: "gauge",
+      chart: true,
+      value: state.reminders.pending,
+    },
+    {
+      key: "failed_reminders",
+      label: "Failed reminders (90d)",
+      unit: "",
+      kind: "gauge",
+      chart: true,
+      value: state.reminders.failed,
     },
     {
       key: "triage_decisions_total",
