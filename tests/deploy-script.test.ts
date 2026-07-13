@@ -1,4 +1,11 @@
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  writeFile,
+} from "node:fs/promises";
 import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -48,7 +55,55 @@ exit 0
   return { dir, bin, log, marker, sha };
 }
 
+async function fakeSourceWorktree(root: string) {
+  const project = path.join(root, "source-worktree");
+  const scripts = path.join(project, "scripts");
+  const worktreeScript = path.join(scripts, "deploy-pi.sh");
+  const gitPointer = "gitdir: /private/tmp/deleted-workstation-gitdir\n";
+  await mkdir(scripts, { recursive: true });
+  await copyFile(script, worktreeScript);
+  await chmod(worktreeScript, 0o755);
+  await writeFile(path.join(project, ".git"), gitPointer);
+  return { project, script: worktreeScript, gitPointer };
+}
+
 describe("deploy-pi.sh provenance marker", () => {
+  it("excludes worktree git files and removes remote artifact metadata before sync", async () => {
+    const f = await fakeFleet();
+    const source = await fakeSourceWorktree(f.dir);
+    const result = spawnSync(source.script, ["fake-host"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${f.bin}:${process.env.PATH}`,
+        DEPLOY_COMMIT: f.sha,
+        FAKE_SHA: f.sha,
+        FAKE_LOG: f.log,
+        FAKE_MARKER: f.marker,
+      },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(await readFile(path.join(source.project, ".git"), "utf8")).toBe(
+      source.gitPointer
+    );
+    const calls = await readFile(f.log, "utf8");
+    const cleanup = calls.indexOf(
+      "rm -rf '/home/magnus/repos/ratatoskr/.git'"
+    );
+    const sync = calls.indexOf("rsync ");
+    expect(cleanup).toBeGreaterThanOrEqual(0);
+    expect(sync).toBeGreaterThan(cleanup);
+    const rsyncCall = calls
+      .split("\n")
+      .find((line) => line.startsWith("rsync "));
+    expect(rsyncCall).toContain("--exclude=.git");
+    expect(rsyncCall).toContain(`${source.project}/`);
+    expect(calls).toContain(
+      "ssh cd /home/magnus/repos/ratatoskr && npm ci --omit=dev"
+    );
+  });
+
   it("writes the exact clean SHA only after a successful restart", async () => {
     const f = await fakeFleet();
     const result = spawnSync(script, ["fake-host"], {

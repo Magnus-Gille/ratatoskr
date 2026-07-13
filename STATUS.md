@@ -1,9 +1,32 @@
 # Ratatoskr Status
 
-**Last session:** 2026-07-13 (Codex) — core hardening branch implemented and locally validated
-**Branch:** `agent/core-hardening` (isolated worktree: `/private/tmp/ratatoskr-core-hardening`)
+**Last session:** 2026-07-13 (Codex) — deterministic deploy artifact follow-up implemented locally
+**Branch:** `agent/deploy-artifact-hardening` (isolated worktree: `/private/tmp/ratatoskr-deploy-hardening`)
 
-## Current Session (2026-07-13) — core hardening pending PR/review/deploy
+## Current Session (2026-07-13) — deploy artifact hardening pending review
+
+PR #46 merged as `1103658` and was deployed successfully, but deploying its
+clean detached worktree exposed an rsync edge case: a worktree represents `.git`
+as a file, while `deploy-pi.sh` excluded only `.git/`. The dangling workstation
+gitdir pointer was copied into the Pi artifact directory. Production was repaired
+immediately by removing that remote `.git`; the service, exact deployed marker,
+and health were reverified.
+
+This branch excludes `.git` regardless of whether it is a file or directory,
+removes deploy-target Git metadata before every remote sync, and uses
+`npm ci --omit=dev` for deterministic production dependency installation. The
+fake-fleet regression runs from a synthetic source worktree containing a `.git`
+file and verifies exclusion, cleanup ordering, lockfile install, and the existing
+fail-closed/exact-SHA marker behavior without contacting a host.
+
+### Remaining / next
+
+- Parent review, then push/open the focused deployment PR.
+- Wait for green CI and review before merge.
+- Deploy from the reviewed exact SHA and verify service state, bot connection,
+  active polls, absence of remote `.git`, and `.deployed-commit` equality.
+
+## Completed This Session (2026-07-13) — core hardening PR #46
 
 Implemented the approved no-new-functionality hardening scope on top of
 `origin/main` at `6de08bf`: reliable at-least-once terminal result delivery,
@@ -18,14 +41,9 @@ TypeScript build, and `git diff --check`. The dependency audit remains unchanged
 and intentionally outside this branch: 3 moderate production findings; 7 total
 including development dependencies.
 
-### Remaining / next
-
-- Push `agent/core-hardening` and open the draft PR once GitHub authentication is
-  usable; no PR exists yet.
-- Run the requested Claude Opus review (or parent fallback review), address any
-  findings, and wait for green GitHub checks.
-- Merge only after review/checks, then deploy Ratatoskr and verify the live
-  service, bot connection, active poll count, and deployed-commit marker.
+PR #46 merged as `1103658`, passed review and GitHub checks, and was deployed.
+The deployment artifact regression and its correction are recorded in the
+current-session section above.
 
 ## Completed This Session (2026-07-13) — issue sweep + Claude-reviewed deployment
 

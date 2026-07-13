@@ -67,7 +67,7 @@ if [ "$IS_LOCAL" = true ]; then
   rm -f "$PROJECT_DIR/.deployed-commit"
 
   echo "==> Installing production dependencies..."
-  npm install --omit=dev
+  npm ci --omit=dev
 
   echo "==> Installing systemd service..."
   sudo cp "$PROJECT_DIR/ratatoskr.service" /etc/systemd/system/
@@ -92,12 +92,15 @@ else
 
   # Remove stale provenance before changing code. A failed deployment remains
   # visibly unmarked instead of falsely claiming either the old or new SHA.
-  ssh "$REMOTE" "rm -f '$REMOTE_DIR/.deployed-commit'"
+  # The target is a deployed artifact directory, never a Git checkout: remove
+  # stale/dangling metadata defensively before rsync so it cannot masquerade as
+  # a source checkout or retain a workstation worktree pointer.
+  ssh "$REMOTE" "rm -f '$REMOTE_DIR/.deployed-commit' && rm -rf '$REMOTE_DIR/.git'"
 
   echo "==> Syncing to $REMOTE:$REMOTE_DIR..."
   rsync -av --delete \
     --exclude='node_modules/' \
-    --exclude='.git/' \
+    --exclude='.git' \
     --exclude='.env' \
     --exclude='.deployed-commit' \
     --exclude='tests/' \
@@ -105,7 +108,7 @@ else
     "$PROJECT_DIR/" "$REMOTE:$REMOTE_DIR/"
 
   echo "==> Installing dependencies on Pi..."
-  ssh "$REMOTE" "cd $REMOTE_DIR && npm install --omit=dev"
+  ssh "$REMOTE" "cd $REMOTE_DIR && npm ci --omit=dev"
 
   echo "==> Installing systemd service..."
   ssh "$REMOTE" "sudo cp $REMOTE_DIR/ratatoskr.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable ratatoskr"
