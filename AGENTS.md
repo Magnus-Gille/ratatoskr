@@ -79,8 +79,9 @@ Default host: `huginmunin.local`.
 
 The deploy script records the exact source SHA in `.deployed-commit` only after
 the restart/status check passes, so Heimdall/Grimnir can prove which revision is
-live. Laptop/remote deploys refuse a dirty tree. The Pi's excluded `.git` is
-stale, so in-place deploys must use
+live. Laptop/remote deploys refuse a dirty tree. The Pi target is an artifact
+directory: remote deploys remove any `.git` file/directory and rsync never sends
+Git metadata. In-place deploys therefore cannot infer source provenance and must use
 `DEPLOY_COMMIT=<source-sha> ./scripts/deploy-pi.sh local`. The old marker is
 removed before mutation; a failed mid-deploy is deliberately unmarked rather
 than falsely claiming either revision.
