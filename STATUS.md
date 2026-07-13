@@ -1,9 +1,26 @@
 # Ratatoskr Status
 
-**Last session:** 2026-07-13 (Codex) — Heimdall alert-resolution transport implemented locally
-**Branch:** `agent/alert-resolution-transport` (isolated worktree: `/private/tmp/ratatoskr-alert-resolution`)
+**Last session:** 2026-07-13 (Codex) — production dependency audit hardening
+**Branch:** `agent/express-audit-fix-20260713` (isolated worktree: `/private/tmp/ratatoskr-audit-express-20260713`)
 
-## Current Session (2026-07-13) — alert lifecycle transport pending review
+## Current Session (2026-07-13) — production audit clean
+
+Closed the production `qs` denial-of-service advisory
+(`GHSA-q8mj-m7cp-5q26`) without changing Ratatoskr behavior:
+
+- Raised the direct Express 4 floor from `^4.21.0` to patched `^4.22.2`.
+- Refreshed only the dependency lock, resolving Express `4.22.2`, body-parser
+  `1.20.6`, and qs `6.15.3`; no override or major-version change was needed.
+- Fresh `npm ci`, all 382 tests (2 skipped), the TypeScript build, project
+  guidance parity, and lockfile dependency-tree checks pass.
+- `npm audit --omit=dev` is clean: 0 production vulnerabilities.
+
+The full audit still reports four development-only dependency findings
+(Vitest/Vite/PostCSS/esbuild: 1 critical, 1 high, 1 moderate, 1 low). They are
+outside this production-advisory-only change and remain a separate hardening
+follow-up; none is installed by a production-only deployment.
+
+## Prior Session (2026-07-13) — alert lifecycle transport pending review
 
 Implemented the Ratatoskr side of Heimdall's resolved-alert contract on top of
 `origin/main` at `2657ceb` (merged PRs #46/#47). The alert validator now keeps a
