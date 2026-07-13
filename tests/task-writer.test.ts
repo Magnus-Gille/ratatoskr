@@ -49,7 +49,9 @@ describe("task-writer", () => {
       munin
     );
 
-    expect(taskId).toMatch(/^\d{8}-\d{6}-fix-navbar-css$/);
+    expect(taskId).toMatch(
+      /^\d{8}-\d{6}-fix-navbar-css-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+    );
   });
 
   it("should write task markdown with correct schema", async () => {
@@ -136,6 +138,25 @@ describe("task-writer", () => {
 
     // Should be slugified: lowercase, special chars replaced
     expect(taskId).toMatch(/^\d{8}-\d{6}-add-user-authentication-login-flow/);
+  });
+
+  it("creates distinct namespaces for concurrent same-title submissions", async () => {
+    const munin = mockMunin();
+    const submission = {
+      title: "Same hardening task",
+      prompt: "Do the bounded work",
+      context: "scratch",
+      timeout: 600,
+      chatId: "1",
+    };
+
+    const ids = await Promise.all(
+      Array.from({ length: 100 }, () => submitTask(submission, munin))
+    );
+
+    expect(new Set(ids).size).toBe(ids.length);
+    const namespaces = munin.write.mock.calls.map((call) => call[0]);
+    expect(new Set(namespaces).size).toBe(namespaces.length);
   });
 
   it("should reject repo traversal before writing a task", async () => {

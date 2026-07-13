@@ -1,5 +1,50 @@
 import { Api } from "grammy";
 import { config } from "./config.js";
+import { AbortContext, runtimeAbort } from "./abort-context.js";
+
+export const TELEGRAM_FILE_TIMEOUT_MS = 30_000;
+
+export interface TelegramDownloadOptions {
+  timeoutMs?: number;
+  fetchImpl?: typeof fetch;
+  abortContext?: AbortContext;
+}
+
+async function getTelegramFile(
+  api: Api,
+  fileId: string,
+  options: TelegramDownloadOptions
+) {
+  const timeoutMs = options.timeoutMs ?? TELEGRAM_FILE_TIMEOUT_MS;
+  const abortContext = options.abortContext ?? runtimeAbort;
+  const signal = abortContext.deadline(timeoutMs);
+  try {
+    // grammY's Node shim types AbortSignal through abort-controller, while
+    // Node's native signal is runtime-compatible but structurally different.
+    return await api.getFile(
+      fileId,
+      signal as Parameters<Api["getFile"]>[1]
+    );
+  } catch (err) {
+    throw abortContext.normalize(err, signal, "Telegram getFile request", timeoutMs);
+  }
+}
+
+async function fetchTelegramFile(
+  url: string,
+  options: TelegramDownloadOptions
+): Promise<Buffer> {
+  const timeoutMs = options.timeoutMs ?? TELEGRAM_FILE_TIMEOUT_MS;
+  const abortContext = options.abortContext ?? runtimeAbort;
+  const signal = abortContext.deadline(timeoutMs);
+  try {
+    const res = await (options.fetchImpl ?? fetch)(url, { signal });
+    if (!res.ok) throw new Error(`Failed to download file: ${res.status}`);
+    return Buffer.from(await res.arrayBuffer());
+  } catch (err) {
+    throw abortContext.normalize(err, signal, "Telegram file download", timeoutMs);
+  }
+}
 
 export interface DownloadedImage {
   base64: string;
@@ -8,17 +53,15 @@ export interface DownloadedImage {
 
 export async function downloadPhoto(
   api: Api,
-  fileId: string
+  fileId: string,
+  options: TelegramDownloadOptions = {}
 ): Promise<DownloadedImage> {
-  const file = await api.getFile(fileId);
+  const file = await getTelegramFile(api, fileId, options);
   const filePath = file.file_path;
   if (!filePath) throw new Error("Telegram returned no file_path");
 
   const url = `https://api.telegram.org/file/bot${config.telegramBotToken}/${filePath}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to download file: ${res.status}`);
-
-  const buffer = Buffer.from(await res.arrayBuffer());
+  const buffer = await fetchTelegramFile(url, options);
   const base64 = buffer.toString("base64");
 
   // Detect media type from extension
@@ -46,17 +89,15 @@ export interface DownloadedFile {
 export async function downloadFile(
   api: Api,
   fileId: string,
-  fallbackMime = "application/octet-stream"
+  fallbackMime = "application/octet-stream",
+  options: TelegramDownloadOptions = {}
 ): Promise<DownloadedFile> {
-  const file = await api.getFile(fileId);
+  const file = await getTelegramFile(api, fileId, options);
   const filePath = file.file_path;
   if (!filePath) throw new Error("Telegram returned no file_path");
 
   const url = `https://api.telegram.org/file/bot${config.telegramBotToken}/${filePath}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to download file: ${res.status}`);
-
-  const buffer = Buffer.from(await res.arrayBuffer());
+  const buffer = await fetchTelegramFile(url, options);
   const filename = filePath.split("/").pop() || "file";
   const ext = filename.split(".").pop()?.toLowerCase();
   const mimeType =

@@ -3,6 +3,10 @@
  * Talks to Munin's JSON-RPC 2.0 API over HTTP (stateless mode — no handshake needed).
  */
 
+import { AbortContext, runtimeAbort } from "./abort-context.js";
+
+export const DEFAULT_MUNIN_REQUEST_TIMEOUT_MS = 10_000;
+
 export interface MuninEntry {
   id: string;
   namespace: string;
@@ -27,6 +31,9 @@ export interface MuninQueryResult {
 export interface MuninClientConfig {
   baseUrl: string;
   apiKey: string;
+  requestTimeoutMs?: number;
+  fetchImpl?: typeof fetch;
+  abortContext?: AbortContext;
 }
 
 let rpcId = 0;
@@ -34,10 +41,17 @@ let rpcId = 0;
 export class MuninClient {
   private baseUrl: string;
   private apiKey: string;
+  private requestTimeoutMs: number;
+  private fetchImpl: typeof fetch;
+  private abortContext: AbortContext;
 
   constructor(config: MuninClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
     this.apiKey = config.apiKey;
+    this.requestTimeoutMs =
+      config.requestTimeoutMs ?? DEFAULT_MUNIN_REQUEST_TIMEOUT_MS;
+    this.fetchImpl = config.fetchImpl ?? fetch;
+    this.abortContext = config.abortContext ?? runtimeAbort;
   }
 
   private async callTool(
@@ -51,49 +65,60 @@ export class MuninClient {
       params: { name, arguments: args },
     };
 
-    const res = await fetch(`${this.baseUrl}/mcp`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-        Accept: "application/json, text/event-stream",
-      },
-      body: JSON.stringify(body),
-    });
+    const signal = this.abortContext.deadline(this.requestTimeoutMs);
+    try {
+      const res = await this.fetchImpl(`${this.baseUrl}/mcp`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify(body),
+        signal,
+      });
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`Munin ${res.status}: ${text}`);
-    }
-
-    // Parse SSE response — extract the last data line with a JSON-RPC result
-    const text = await res.text();
-    const lines = text.split("\n");
-    let lastData = "";
-    for (const line of lines) {
-      if (line.startsWith("data: ")) {
-        lastData = line.slice(6);
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Munin ${res.status}: ${text}`);
       }
-    }
 
-    if (!lastData) {
-      // Maybe it's a plain JSON response
-      const parsed = JSON.parse(text);
-      if (parsed.result?.content?.[0]?.text) {
-        return JSON.parse(parsed.result.content[0].text);
+      // Parse SSE response — extract the last data line with a JSON-RPC result
+      const text = await res.text();
+      const lines = text.split("\n");
+      let lastData = "";
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          lastData = line.slice(6);
+        }
       }
-      return parsed;
-    }
 
-    const rpc = JSON.parse(lastData);
-    if (rpc.error) {
-      throw new Error(`Munin RPC error: ${JSON.stringify(rpc.error)}`);
+      if (!lastData) {
+        // Maybe it's a plain JSON response
+        const parsed = JSON.parse(text);
+        if (parsed.result?.content?.[0]?.text) {
+          return JSON.parse(parsed.result.content[0].text);
+        }
+        return parsed;
+      }
+
+      const rpc = JSON.parse(lastData);
+      if (rpc.error) {
+        throw new Error(`Munin RPC error: ${JSON.stringify(rpc.error)}`);
+      }
+      const content = rpc.result?.content?.[0]?.text;
+      if (content) {
+        return JSON.parse(content);
+      }
+      return rpc.result;
+    } catch (err) {
+      throw this.abortContext.normalize(
+        err,
+        signal,
+        "Munin request",
+        this.requestTimeoutMs
+      );
     }
-    const content = rpc.result?.content?.[0]?.text;
-    if (content) {
-      return JSON.parse(content);
-    }
-    return rpc.result;
   }
 
   async read(
@@ -149,8 +174,9 @@ export class MuninClient {
   }
 
   async health(): Promise<boolean> {
+    const signal = this.abortContext.deadline(this.requestTimeoutMs);
     try {
-      const res = await fetch(`${this.baseUrl}/health`);
+      const res = await this.fetchImpl(`${this.baseUrl}/health`, { signal });
       return res.ok;
     } catch {
       return false;

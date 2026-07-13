@@ -161,6 +161,7 @@ describe("ResultPoller", () => {
     });
 
     expect(result).toContain("cancelled");
+    await new Promise((resolve) => setImmediate(resolve));
     expect(poller.activePollCount).toBe(0);
   });
 
@@ -344,5 +345,91 @@ describe("ResultPoller", () => {
 
     await new Promise((r) => setTimeout(r, 300));
     expect(onComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries terminal delivery after callback failure and marks only after success", async () => {
+    const writeFn = vi.fn().mockResolvedValue({});
+    const munin = mockMunin({
+      read: vi.fn().mockImplementation(async (_ns, key) => {
+        if (key === "status") {
+          return { found: true, content: "done", tags: ["completed"] };
+        }
+        if (key === "result") {
+          return { found: true, content: "Result!", tags: [] };
+        }
+        return null;
+      }),
+      write: writeFn,
+    });
+    const onComplete = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("telegram unavailable"))
+      .mockResolvedValue(undefined);
+    poller = new ResultPoller(munin);
+
+    poller.startPolling("retry-result", onComplete);
+    await new Promise((resolve) => setTimeout(resolve, 260));
+
+    expect(onComplete).toHaveBeenCalledTimes(2);
+    expect(writeFn.mock.calls.filter((call) => call[1] === "delivery")).toHaveLength(1);
+    expect(poller.activePollCount).toBe(0);
+  });
+
+  it("retries a failed marker without resending a confirmed Telegram result", async () => {
+    const writeFn = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("munin marker write failed"))
+      .mockResolvedValue({});
+    const munin = mockMunin({
+      read: vi.fn().mockImplementation(async (_ns, key) => {
+        if (key === "status") {
+          return { found: true, content: "done", tags: ["completed"] };
+        }
+        if (key === "result") {
+          return { found: true, content: "Result!", tags: [] };
+        }
+        return null;
+      }),
+      write: writeFn,
+    });
+    const onComplete = vi.fn().mockResolvedValue(undefined);
+    poller = new ResultPoller(munin);
+
+    poller.startPolling("marker-retry", onComplete);
+    await new Promise((resolve) => setTimeout(resolve, 260));
+
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(writeFn.mock.calls.filter((call) => call[1] === "delivery")).toHaveLength(2);
+    expect(poller.activePollCount).toBe(0);
+  });
+
+  it("continues polling after a bounded Munin timeout", async () => {
+    let statusReads = 0;
+    const munin = mockMunin({
+      read: vi.fn().mockImplementation(async (_ns, key) => {
+        if (key === "status") {
+          statusReads += 1;
+          if (statusReads === 1) {
+            const err = new Error("Munin request timed out after 10ms");
+            err.name = "RequestTimeoutError";
+            throw err;
+          }
+          return { found: true, content: "done", tags: ["completed"] };
+        }
+        if (key === "result") {
+          return { found: true, content: "Recovered", tags: [] };
+        }
+        return null;
+      }),
+    });
+    const onComplete = vi.fn().mockResolvedValue(undefined);
+    poller = new ResultPoller(munin);
+
+    poller.startPolling("timeout-recovery", onComplete);
+    await new Promise((resolve) => setTimeout(resolve, 260));
+
+    expect(statusReads).toBeGreaterThanOrEqual(2);
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(poller.activePollCount).toBe(0);
   });
 });

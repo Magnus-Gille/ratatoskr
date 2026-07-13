@@ -52,7 +52,7 @@ vi.mock("grammy", () => ({
   Context: vi.fn(),
 }));
 
-import { buildReplyContext } from "../src/bot.js";
+import { buildReplyContext, conciergeErrorReason } from "../src/bot.js";
 
 describe("buildReplyContext", () => {
   it("returns null when repliedTo is null and tracked is null", () => {
@@ -133,5 +133,21 @@ describe("buildReplyContext", () => {
     );
     expect(result).not.toBeNull();
     expect(result!.replyToText!.length).toBe(1000);
+  });
+});
+
+describe("conciergeErrorReason", () => {
+  it("classifies bounded request deadline failures without exposing internals", () => {
+    const error = new Error("Anthropic triage request timed out after 60000ms");
+    error.name = "RequestTimeoutError";
+    expect(conciergeErrorReason(error)).toBe("API timed out");
+  });
+
+  it("classifies service-shutdown aborts separately from network failures", () => {
+    const error = new Error(
+      "Anthropic triage request aborted because Ratatoskr is shutting down"
+    );
+    error.name = "ServiceShutdownError";
+    expect(conciergeErrorReason(error)).toBe("service is shutting down");
   });
 });

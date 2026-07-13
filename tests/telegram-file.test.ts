@@ -12,6 +12,7 @@ const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
 import { downloadPhoto } from "../src/telegram-file.js";
+import { AbortContext } from "../src/abort-context.js";
 
 function makeApi(filePath: string | undefined) {
   return {
@@ -41,9 +42,13 @@ describe("downloadPhoto", () => {
 
     const result = await downloadPhoto(api as never, "file-id-123");
 
-    expect(api.getFile).toHaveBeenCalledWith("file-id-123");
+    expect(api.getFile).toHaveBeenCalledWith(
+      "file-id-123",
+      expect.any(AbortSignal)
+    );
     expect(mockFetch).toHaveBeenCalledWith(
-      "https://api.telegram.org/file/bottest-bot-token/photos/file_0.jpg"
+      "https://api.telegram.org/file/bottest-bot-token/photos/file_0.jpg",
+      { signal: expect.any(AbortSignal) }
     );
     expect(result.mediaType).toBe("image/jpeg");
     expect(result.base64).toBe(imageData.toString("base64"));
@@ -105,5 +110,50 @@ describe("downloadPhoto", () => {
     await expect(downloadPhoto(api as never, "file-id-404")).rejects.toThrow(
       "Failed to download file: 404"
     );
+  });
+
+  it("aborts and classifies a hung Telegram file download", async () => {
+    mockFetch.mockImplementation((_url, init: RequestInit) => {
+      const signal = init.signal as AbortSignal;
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        });
+      });
+    });
+    const api = makeApi("photos/file_0.jpg");
+
+    await expect(
+      downloadPhoto(api as never, "file-id-timeout", {
+        timeoutMs: 10,
+        abortContext: new AbortContext(),
+      })
+    ).rejects.toMatchObject({
+      name: "RequestTimeoutError",
+      message: "Telegram file download timed out after 10ms",
+    });
+  });
+
+  it("aborts and classifies a hung Telegram getFile request", async () => {
+    const api = {
+      getFile: vi.fn((_fileId: string, signal: AbortSignal) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+        })
+      ),
+    };
+
+    await expect(
+      downloadPhoto(api as never, "file-id-timeout", {
+        timeoutMs: 10,
+        abortContext: new AbortContext(),
+      })
+    ).rejects.toMatchObject({
+      name: "RequestTimeoutError",
+      message: "Telegram getFile request timed out after 10ms",
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });
