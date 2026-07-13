@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { cancelTask } from "../src/bot.js";
+import { cancelTask, cancelledTaskTags } from "../src/bot.js";
 import type { MuninClient } from "../src/munin-client.js";
 import type { ResultPoller } from "../src/result-poller.js";
 
@@ -17,7 +17,13 @@ function pendingMunin(writeResult: unknown = {}) {
       namespace: "tasks/task-1",
       key: "status",
       content: "pending task",
-      tags: ["pending", "instance:test"],
+      tags: [
+        "pending",
+        "instance:test",
+        "context:repo:ratatoskr",
+        "provenance:telegram",
+        "cancelled",
+      ],
       created_at: "2026-07-13T10:00:00.000Z",
       updated_at: "2026-07-13T10:01:00.000Z",
     }),
@@ -29,6 +35,26 @@ function pendingMunin(writeResult: unknown = {}) {
 }
 
 describe("cancelTask", () => {
+  it("replaces every lifecycle tag while preserving provenance", () => {
+    expect(
+      cancelledTaskTags([
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        "instance:test",
+        "context:repo:ratatoskr",
+        "provenance:telegram",
+      ])
+    ).toEqual([
+      "instance:test",
+      "context:repo:ratatoskr",
+      "provenance:telegram",
+      "cancelled",
+    ]);
+  });
+
   it("cancels with the status version as a compare-and-swap guard", async () => {
     const munin = pendingMunin();
     const resultPoller = poller();
@@ -40,8 +66,18 @@ describe("cancelTask", () => {
       "tasks/task-1",
       "status",
       "pending task",
-      ["cancelled"],
+      [
+        "instance:test",
+        "context:repo:ratatoskr",
+        "provenance:telegram",
+        "cancelled",
+      ],
       "2026-07-13T10:01:00.000Z"
+    );
+    const writtenTags = munin.write.mock.calls[0][3] as string[];
+    expect(writtenTags.filter((tag) => tag === "cancelled")).toHaveLength(1);
+    expect(writtenTags).not.toEqual(
+      expect.arrayContaining(["pending", "running", "completed", "failed"])
     );
     expect(resultPoller.stopPolling).toHaveBeenCalledWith("task-1");
   });

@@ -125,6 +125,21 @@ function isConflict(value: unknown): boolean {
   return value instanceof Error && /\bconflict\b/i.test(value.message);
 }
 
+const TASK_LIFECYCLE_TAGS = new Set([
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+
+export function cancelledTaskTags(tags: string[]): string[] {
+  return [
+    ...tags.filter((tag) => !TASK_LIFECYCLE_TAGS.has(tag)),
+    "cancelled",
+  ];
+}
+
 /**
  * Cancel a still-pending task with Munin compare-and-swap protection. Hugin may
  * claim a task between our read and write; expectedUpdatedAt makes that race a
@@ -160,7 +175,7 @@ export async function cancelTask(
       `tasks/${taskId}`,
       "status",
       entry.content,
-      ["cancelled"],
+      cancelledTaskTags(entry.tags),
       entry.updated_at
     );
     if (isConflict(result)) {
