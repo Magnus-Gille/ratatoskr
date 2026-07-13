@@ -9,6 +9,17 @@ export class ResultPoller {
   private pickupAcked: Set<string> = new Set();
   /** Tasks with a poll currently in flight — serializes overlapping interval ticks. */
   private polling: Set<string> = new Set();
+  /**
+   * Tasks whose Telegram result send succeeded but whose Munin delivery marker
+   * has not necessarily persisted yet. This prevents same-process duplicates
+   * while marker writes are retried.
+   *
+   * Delivery is deliberately at-least-once: if the process dies after Telegram
+   * accepts a message but before Munin records the marker, startup recovery can
+   * send it again. Telegram has no idempotency key, so that rare duplicate is
+   * preferable to silently losing a task result.
+   */
+  private deliveryConfirmed: Set<string> = new Set();
   private munin: MuninClient;
   private stopped = false;
 
@@ -65,29 +76,33 @@ export class ResultPoller {
           return;
         }
 
-        // Terminal — deliver the result and stop polling.
-        this.stopPolling(taskId);
-
         if (tags.includes("cancelled")) {
           await onComplete(STATUS_MESSAGES.cancelled(taskId));
+          this.stopPolling(taskId);
           return;
         }
 
-        let resultText = tags.includes("completed")
-          ? STATUS_MESSAGES.completedFallback
-          : STATUS_MESSAGES.failedFallback;
-        try {
-          const result = await this.munin.read(`tasks/${taskId}`, "result");
-          if (result) {
-            resultText = result.content;
+        // A callback failure means Telegram did not confirm delivery. Keep the
+        // poll active and retry on the next interval; do not write a marker.
+        if (!this.deliveryConfirmed.has(taskId)) {
+          let resultText = tags.includes("completed")
+            ? STATUS_MESSAGES.completedFallback
+            : STATUS_MESSAGES.failedFallback;
+          try {
+            const result = await this.munin.read(`tasks/${taskId}`, "result");
+            if (result) {
+              resultText = result.content;
+            }
+          } catch {
+            // Could not read result — use default message
           }
-        } catch {
-          // Could not read result — use default message
+
+          await onComplete(resultText);
+          this.deliveryConfirmed.add(taskId);
         }
 
-        await onComplete(resultText);
-
-        // Mark as delivered so recovery won't re-deliver
+        // Persist only after Telegram confirms the send. If this write fails,
+        // retry only the marker on the next tick — never resend in this process.
         try {
           await this.munin.write(
             `tasks/${taskId}`,
@@ -95,9 +110,14 @@ export class ResultPoller {
             `Delivered to Telegram at ${new Date().toISOString()}`,
             ["delivered", `instance:${config.instanceId}`]
           );
-        } catch {
-          // Best-effort — delivery already happened
+        } catch (err) {
+          console.error(
+            `Delivery marker write failed for ${taskId}; will retry without resending:`,
+            err
+          );
+          return;
         }
+        this.stopPolling(taskId);
       } catch (err) {
         console.error(`Poll error for ${taskId}:`, err);
       } finally {
@@ -110,10 +130,27 @@ export class ResultPoller {
 
     // Set max duration timeout
     const timeout = setTimeout(() => {
+      const deliveryWasConfirmed = this.deliveryConfirmed.has(taskId);
       this.stopPolling(taskId);
-      void onComplete(
-        STATUS_MESSAGES.pollTimeout(taskId, Math.round(config.maxPollDurationMs / 60000))
-      );
+      if (deliveryWasConfirmed) {
+        console.error(
+          `Delivery for ${taskId} was confirmed but its Munin marker could not be ` +
+            `persisted before polling timed out; restart recovery may duplicate it.`
+        );
+        return;
+      }
+      void Promise.resolve()
+        .then(() =>
+          onComplete(
+            STATUS_MESSAGES.pollTimeout(
+              taskId,
+              Math.round(config.maxPollDurationMs / 60000)
+            )
+          )
+        )
+        .catch((err) => {
+          console.error(`Failed to deliver poll-timeout notice for ${taskId}:`, err);
+        });
     }, config.maxPollDurationMs);
     this.timeouts.set(taskId, timeout);
 
@@ -167,6 +204,7 @@ export class ResultPoller {
     // Bound the pickup-ack guard to currently-polled tasks (avoids unbounded
     // growth over a long-lived process).
     this.pickupAcked.delete(taskId);
+    this.deliveryConfirmed.delete(taskId);
   }
 
   stopAll(): void {

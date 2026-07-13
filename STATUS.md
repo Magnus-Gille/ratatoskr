@@ -1,7 +1,31 @@
 # Ratatoskr Status
 
-**Last session:** 2026-07-13 (Codex) — autonomous issue sweep, five PRs merged and deployed
-**Branch:** main
+**Last session:** 2026-07-13 (Codex) — core hardening branch implemented and locally validated
+**Branch:** `agent/core-hardening` (isolated worktree: `/private/tmp/ratatoskr-core-hardening`)
+
+## Current Session (2026-07-13) — core hardening pending PR/review/deploy
+
+Implemented the approved no-new-functionality hardening scope on top of
+`origin/main` at `6de08bf`: reliable at-least-once terminal result delivery,
+UUID-backed task IDs, strict bounded concierge decisions with encoded untrusted
+context boundaries, CAS-safe cancellation that preserves provenance tags, and
+bounded/shutdown-aware Munin, Anthropic, M5, and Telegram requests. Initial
+implementation commit: `fcd1802`; the follow-up commit addresses the final
+fallback-review findings for cancellation tags and hostile closing-tag payloads.
+
+Local validation is green: full Vitest suite, focused hardening regressions,
+TypeScript build, and `git diff --check`. The dependency audit remains unchanged
+and intentionally outside this branch: 3 moderate production findings; 7 total
+including development dependencies.
+
+### Remaining / next
+
+- Push `agent/core-hardening` and open the draft PR once GitHub authentication is
+  usable; no PR exists yet.
+- Run the requested Claude Opus review (or parent fallback review), address any
+  findings, and wait for green GitHub checks.
+- Merge only after review/checks, then deploy Ratatoskr and verify the live
+  service, bot connection, active poll count, and deployed-commit marker.
 
 ## Completed This Session (2026-07-13) — issue sweep + Claude-reviewed deployment
 

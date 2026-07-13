@@ -220,6 +220,56 @@ describe("recoverActivePolls", () => {
     expect(botApi.sendMessage).not.toHaveBeenCalled();
   });
 
+  it("leaves no marker after failed delivery so the next restart can retry", async () => {
+    const poller = mockPoller();
+    const botApi = mockBotApi();
+    botApi.sendMessage
+      .mockRejectedValueOnce(new Error("telegram unavailable"))
+      .mockResolvedValue({});
+    const writeFn = vi.fn().mockResolvedValue({});
+    const munin = mockMunin({
+      query: vi.fn().mockImplementation(async (opts) => {
+        if (opts.tags.includes("completed")) {
+          return {
+            results: [
+              {
+                namespace: "tasks/20260325-100000-restart-retry",
+                key: "status",
+                tags: ["completed", "instance:test-instance"],
+                content_preview: "Task...",
+              },
+            ],
+            total: 1,
+          };
+        }
+        return { results: [], total: 0 };
+      }),
+      read: vi.fn().mockImplementation(async (_ns, key) => {
+        if (key === "delivery") return null;
+        if (key === "status") {
+          return { found: true, content: TASK_CONTENT, tags: ["completed"] };
+        }
+        if (key === "result") {
+          return { found: true, content: "Restart-safe result", tags: [] };
+        }
+        return null;
+      }),
+      write: writeFn,
+    });
+
+    expect(await recoverActivePolls(munin, poller, botApi)).toBe(0);
+    expect(writeFn).not.toHaveBeenCalledWith(
+      expect.anything(),
+      "delivery",
+      expect.anything(),
+      expect.anything()
+    );
+
+    expect(await recoverActivePolls(munin, poller, botApi)).toBe(1);
+    expect(botApi.sendMessage).toHaveBeenCalledTimes(2);
+    expect(writeFn.mock.calls.filter((call) => call[1] === "delivery")).toHaveLength(1);
+  });
+
   it("should handle empty Munin gracefully", async () => {
     const poller = mockPoller();
     const botApi = mockBotApi();

@@ -35,6 +35,7 @@ function makeDeliveryCallback(
         `Failed to deliver recovered result for ${taskId}:`,
         err
       );
+      throw err;
     }
   };
 }

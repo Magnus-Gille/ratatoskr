@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
 import { MuninClient } from "./munin-client.js";
 import { signTask } from "./task-signing.js";
@@ -23,7 +24,10 @@ function generateTaskId(title: string): string {
   const pad = (n: number, len = 2) => String(n).padStart(len, "0");
   const date = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}`;
   const time = `${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}`;
-  return `${date}-${time}-${slugify(title)}`;
+  // A timestamp + slug alone collides when two same-title tasks arrive in the
+  // same second. UUID entropy keeps the readable prefix while making each Munin
+  // task namespace independent across concurrent requests and process restarts.
+  return `${date}-${time}-${slugify(title)}-${randomUUID()}`;
 }
 
 const SAFE_REPO_NAME = /^[a-z0-9][a-z0-9-]*$/;

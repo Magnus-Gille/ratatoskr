@@ -12,6 +12,7 @@ import { attachBindResilience } from "./listen.js";
 import { TriageStats } from "./triage-stats.js";
 import { DurableReminderQueue } from "./reminders.js";
 import { registerReminderRoutes } from "./reminder-handler.js";
+import { runtimeAbort } from "./abort-context.js";
 
 validateConfig();
 
@@ -124,6 +125,7 @@ bot
 
 function shutdown(signal: string) {
   console.log(`${signal} received, shutting down...`);
+  runtimeAbort.abort();
   bot.stop();
   botConnected = false;
   poller.stopAll();

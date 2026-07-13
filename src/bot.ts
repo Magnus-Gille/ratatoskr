@@ -114,6 +114,90 @@ export function buildReplyContext(
   return { type: "status", timestamp: Date.now(), replyToText };
 }
 
+export type CancelTaskResult =
+  | { kind: "cancelled"; message: string }
+  | { kind: "not-found" | "running" | "finished" | "conflict"; message: string };
+
+function isConflict(value: unknown): boolean {
+  if (value && typeof value === "object" && "error" in value) {
+    return (value as { error?: unknown }).error === "conflict";
+  }
+  return value instanceof Error && /\bconflict\b/i.test(value.message);
+}
+
+const TASK_LIFECYCLE_TAGS = new Set([
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+
+export function cancelledTaskTags(tags: string[]): string[] {
+  return [
+    ...tags.filter((tag) => !TASK_LIFECYCLE_TAGS.has(tag)),
+    "cancelled",
+  ];
+}
+
+/**
+ * Cancel a still-pending task with Munin compare-and-swap protection. Hugin may
+ * claim a task between our read and write; expectedUpdatedAt makes that race a
+ * visible conflict instead of overwriting the newer running state.
+ */
+export async function cancelTask(
+  taskId: string,
+  munin: MuninClient,
+  poller: ResultPoller
+): Promise<CancelTaskResult> {
+  const entry = await munin.read(`tasks/${taskId}`, "status");
+  if (!entry) {
+    return { kind: "not-found", message: `Task ${taskId} not found.` };
+  }
+  if (entry.tags.includes("running")) {
+    return {
+      kind: "running",
+      message: `Task ${taskId} is already running — can't cancel.`,
+    };
+  }
+  if (entry.tags.includes("completed") || entry.tags.includes("failed")) {
+    return { kind: "finished", message: `Task ${taskId} already finished.` };
+  }
+  if (!entry.updated_at) {
+    return {
+      kind: "conflict",
+      message: `Task ${taskId} has no version marker — refresh /status and try again.`,
+    };
+  }
+
+  try {
+    const result = await munin.write(
+      `tasks/${taskId}`,
+      "status",
+      entry.content,
+      cancelledTaskTags(entry.tags),
+      entry.updated_at
+    );
+    if (isConflict(result)) {
+      return {
+        kind: "conflict",
+        message: `Task ${taskId} changed state while cancelling — refresh /status and try again.`,
+      };
+    }
+  } catch (err) {
+    if (isConflict(err)) {
+      return {
+        kind: "conflict",
+        message: `Task ${taskId} changed state while cancelling — refresh /status and try again.`,
+      };
+    }
+    throw err;
+  }
+
+  poller.stopPolling(taskId);
+  return { kind: "cancelled", message: `Cancelled ${taskId}.` };
+}
+
 interface ConversationEntry {
   role: "user" | "assistant";
   content: string;
@@ -147,13 +231,18 @@ function formatDuration(seconds: number): string {
   return `${Math.round(seconds / 3600)}h`;
 }
 
-function conciergeErrorReason(err: unknown): string {
+export function conciergeErrorReason(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   // Transcription errors must classify before the generic JSON branch, else an
   // invalid-JSON transcription response reads as "Haiku returned gibberish".
   if (/transcri/i.test(msg)) return "transcription failed — check the voice endpoint";
   if (/rate.?limit|429/i.test(msg)) return "API rate limit, wait a moment";
-  if (/timeout|ETIMEDOUT|ECONNABORTED/i.test(msg)) return "API timed out";
+  if (/timeout|timed?\s+out|ETIMEDOUT|ECONNABORTED/i.test(msg)) {
+    return "API timed out";
+  }
+  if (/shutting down|ServiceShutdownError/i.test(msg)) {
+    return "service is shutting down";
+  }
   if (/ECONNREFUSED|ENOTFOUND|fetch failed/i.test(msg)) return "can't reach API";
   if (/Munin/i.test(msg)) return "Munin unreachable";
   if (/JSON|parse|Unexpected token/i.test(msg)) return "Haiku returned gibberish";
@@ -415,6 +504,7 @@ export function createBot(
               });
             } catch (err) {
               console.error(`Failed to deliver result for ${taskId}:`, err);
+              throw err;
             }
           },
           makePickupAck(ctx)
@@ -494,30 +584,8 @@ Or just send a message and the concierge will triage it.`
       return;
     }
     try {
-      const entry = await munin.read(`tasks/${taskId}`, "status");
-      if (!entry) {
-        await ctx.reply(`Task ${taskId} not found.`);
-        return;
-      }
-      if (entry.tags.includes("running")) {
-        await ctx.reply(`Task ${taskId} is already running — can't cancel.`);
-        return;
-      }
-      if (
-        entry.tags.includes("completed") ||
-        entry.tags.includes("failed")
-      ) {
-        await ctx.reply(`Task ${taskId} already finished.`);
-        return;
-      }
-      await munin.write(
-        `tasks/${taskId}`,
-        "status",
-        entry.content,
-        ["cancelled"]
-      );
-      poller.stopPolling(taskId);
-      await ctx.reply(`Cancelled ${taskId}.`);
+      const result = await cancelTask(taskId, munin, poller);
+      await ctx.reply(result.message);
     } catch (err) {
       console.error("Cancel command error:", err);
       await ctx.reply("Error cancelling task. Check logs.");
@@ -557,6 +625,7 @@ Or just send a message and the concierge will triage it.`
             });
           } catch (err) {
             console.error(`Failed to deliver result for ${taskId}:`, err);
+            throw err;
           }
         },
         makePickupAck(ctx)
@@ -611,6 +680,7 @@ Or just send a message and the concierge will triage it.`
             });
           } catch (err) {
             console.error(`Failed to deliver result for ${taskId}:`, err);
+            throw err;
           }
         },
         makePickupAck(ctx)
