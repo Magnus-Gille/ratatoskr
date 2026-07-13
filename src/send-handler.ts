@@ -14,9 +14,9 @@ export interface SendHandlerDeps {
   /** Error sink for send failures. Injectable so tests can assert/silence it. */
   logError?: (message: string, err: unknown) => void;
   /**
-   * Best-effort echo of an alert envelope to Heimdall's ingest. Optional —
-   * when unset (HEIMDALL_INGEST_URL unconfigured) the echo is skipped. A
-   * rejection here never fails the Telegram send (issue #16).
+   * Forward an alert envelope to Heimdall's ingest. Optional for firing and
+   * text-backed requests, where Telegram is the primary action; required for
+   * resolution-only requests, where it is the sole delivery path (issue #16).
    */
   notifyHeimdall?: (alert: AlertEnvelope) => Promise<void>;
 }
@@ -55,13 +55,13 @@ export function createSendHandler(
 
     // Resolve the message to send: an explicit, non-blank `text` always wins and
     // preserves the legacy behavior (any `alert` is ignored for rendering but
-    // still echoed). Otherwise fall back to rendering a valid `alert` envelope.
+    // still echoed). Otherwise render a firing alert or transport a resolution.
     // Whitespace-only text falls through so a placeholder text alongside a real
     // alert renders the alert rather than 500ing on an empty Telegram message.
     const hasText = typeof text === "string" && text.trim().length > 0;
     const validAlert = alert !== undefined ? validateAlert(alert) : null;
 
-    let messageText: string;
+    let messageText: string | null;
     if (hasText) {
       messageText = text as string;
       // An alert was supplied but failed validation; text wins so it's silently
@@ -75,11 +75,19 @@ export function createSendHandler(
             : { invalidAlertType: Array.isArray(alert) ? "array" : typeof alert };
         logError("Alert supplied but invalid; not rendered or echoed", meta);
       }
+    } else if (validAlert?.state === "resolved") {
+      // A resolution is a Heimdall lifecycle event, not a firing alert to
+      // render. With no explicit text it traverses auth + allowlisting and is
+      // forwarded without generating a Telegram message.
+      messageText = null;
     } else if (validAlert) {
       messageText = renderAlertText(validAlert);
     } else if (alert !== undefined) {
       // An alert was supplied but is malformed, and there is no text fallback.
-      res.status(400).json({ error: "alert.title (string) is required" });
+      res.status(400).json({
+        error:
+          "alert requires a firing title or state=resolved with dedup_key",
+      });
       return;
     } else {
       res
@@ -93,21 +101,40 @@ export function createSendHandler(
       return;
     }
 
-    try {
-      await deps.sendMessage(chat_id, messageText);
-    } catch (err) {
-      logError("Failed to send Telegram message:", err);
-      res.status(500).json({ error: String(err) });
+    const requiresHeimdallDelivery =
+      validAlert?.state === "resolved" && messageText === null;
+    if (requiresHeimdallDelivery && !deps.notifyHeimdall) {
+      res.status(503).json({
+        error: "Heimdall alert resolution forwarding is not configured",
+      });
       return;
     }
 
-    // Best-effort echo to Heimdall — only when a valid alert was supplied and a
-    // notifier is configured. A failure here must NOT fail the request.
+    if (messageText !== null) {
+      try {
+        await deps.sendMessage(chat_id, messageText);
+      } catch (err) {
+        logError("Failed to send Telegram message:", err);
+        res.status(500).json({ error: String(err) });
+        return;
+      }
+    }
+
+    // Firing/text-backed alerts keep their historical best-effort echo because
+    // Telegram is their accepted primary action. Resolution-only events have no
+    // Telegram side effect, so Heimdall is the primary delivery: failures must
+    // surface to the producer so it can retry instead of recording false success.
     if (validAlert && deps.notifyHeimdall) {
       try {
         await deps.notifyHeimdall(validAlert);
       } catch (err) {
         logError("Failed to echo alert to Heimdall:", err);
+        if (requiresHeimdallDelivery) {
+          res.status(502).json({
+            error: "Failed to forward alert resolution to Heimdall",
+          });
+          return;
+        }
       }
     }
 
