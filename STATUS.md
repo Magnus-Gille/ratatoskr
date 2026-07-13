@@ -1,9 +1,30 @@
 # Ratatoskr Status
 
-**Last session:** 2026-07-13 (Codex) — deterministic deploy artifact follow-up implemented locally
-**Branch:** `agent/deploy-artifact-hardening` (isolated worktree: `/private/tmp/ratatoskr-deploy-hardening`)
+**Last session:** 2026-07-13 (Codex) — Heimdall alert-resolution transport implemented locally
+**Branch:** `agent/alert-resolution-transport` (isolated worktree: `/private/tmp/ratatoskr-alert-resolution`)
 
-## Current Session (2026-07-13) — deploy artifact hardening pending review
+## Current Session (2026-07-13) — alert lifecycle transport pending review
+
+Implemented the Ratatoskr side of Heimdall's resolved-alert contract on top of
+`origin/main` at `2657ceb` (merged PRs #46/#47). The alert validator now keeps a
+strict firing/resolved distinction: firing alerts still require a nonempty title;
+`state:"resolved"` events may omit title but require a trimmed nonempty
+`dedup_key`. Unknown states and incomplete lifecycle events are rejected.
+
+Resolution-only `/api/send` requests still pass the existing Bearer-auth and
+Telegram chat allowlist gates, then forward the clean `{state:"resolved",
+dedup_key}` envelope to Heimdall without manufacturing a Telegram message.
+Explicit text still wins and retains the existing send-before-best-effort-echo
+ordering. No producer keys or unrelated alert behavior were added.
+
+### Remaining / next
+
+- Parent fallback review, then push/open the focused PR.
+- Wait for green CI/review before merge.
+- Deploy only after merge and verify authenticated firing + resolution transport
+  against the live Heimdall ingest without creating new producer alerts.
+
+## Completed This Session (2026-07-13) — deploy artifact hardening PR #47
 
 PR #46 merged as `1103658` and was deployed successfully, but deploying its
 clean detached worktree exposed an rsync edge case: a worktree represents `.git`
@@ -19,12 +40,8 @@ fake-fleet regression runs from a synthetic source worktree containing a `.git`
 file and verifies exclusion, cleanup ordering, lockfile install, and the existing
 fail-closed/exact-SHA marker behavior without contacting a host.
 
-### Remaining / next
-
-- Parent review, then push/open the focused deployment PR.
-- Wait for green CI and review before merge.
-- Deploy from the reviewed exact SHA and verify service state, bot connection,
-  active polls, absence of remote `.git`, and `.deployed-commit` equality.
+PR #47 merged as `2657ceb`. This session did not change deployment state; verify
+the live deployed marker before the next rollout.
 
 ## Completed This Session (2026-07-13) — core hardening PR #46
 

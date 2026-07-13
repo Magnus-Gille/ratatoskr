@@ -27,6 +27,40 @@ describe("validateAlert", () => {
     expect(alert).toEqual(input);
   });
 
+  it("accepts and preserves an explicit firing state when title is present", () => {
+    expect(
+      validateAlert({ state: "firing", title: "Disk full", dedup_key: "disk" })
+    ).toEqual({ state: "firing", title: "Disk full", dedup_key: "disk" });
+  });
+
+  it("accepts a resolution without title and requires a trimmed dedup key", () => {
+    expect(
+      validateAlert({
+        state: "resolved",
+        dedup_key: "  disk:root  ",
+        source: "node-exporter",
+        unknown: "drop",
+      })
+    ).toEqual({
+      state: "resolved",
+      dedup_key: "disk:root",
+      source: "node-exporter",
+    });
+  });
+
+  it("rejects resolutions without a nonempty string dedup key", () => {
+    expect(validateAlert({ state: "resolved" })).toBeNull();
+    expect(validateAlert({ state: "resolved", dedup_key: "" })).toBeNull();
+    expect(validateAlert({ state: "resolved", dedup_key: "   " })).toBeNull();
+    expect(validateAlert({ state: "resolved", dedup_key: 42 })).toBeNull();
+  });
+
+  it("rejects explicit firing without title and unknown alert states", () => {
+    expect(validateAlert({ state: "firing", dedup_key: "disk" })).toBeNull();
+    expect(validateAlert({ state: "quiet", title: "Disk full" })).toBeNull();
+    expect(validateAlert({ state: 42, title: "Disk full" })).toBeNull();
+  });
+
   it("rejects a non-object", () => {
     expect(validateAlert("nope")).toBeNull();
     expect(validateAlert(42)).toBeNull();
@@ -242,6 +276,26 @@ describe("createHeimdallNotifier", () => {
     expect(JSON.parse(init.body).dedup_key).toBe("k1");
     // Real abort wiring, not just "defined" — pins the timeout signal.
     expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("preserves a resolution state and dedup key in the Heimdall request", async () => {
+    const resolution: AlertEnvelope = {
+      state: "resolved",
+      dedup_key: "hugin:auth",
+    };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue({ ok: true, status: 200 } as Response);
+    const notify = createHeimdallNotifier({
+      url: "http://heimdall:3033/api/alerts",
+      token: "tok",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    await notify(resolution);
+
+    const [, init] = fetchImpl.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual(resolution);
   });
 
   it("wires AbortSignal.timeout with the default 3000ms when unset", async () => {

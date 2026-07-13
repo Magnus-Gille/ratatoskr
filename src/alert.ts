@@ -2,9 +2,9 @@
  * Alert envelope support for POST /api/send (issue #16, Grimnir v2 P3 alert bus).
  *
  * A caller may POST a standard `alert` envelope instead of (or alongside) raw
- * `text`. Ratatoskr renders a Telegram message from the envelope when no `text`
- * is supplied, and — best-effort — echoes the envelope to Heimdall's fail-closed
- * `/api/alerts` ingest so the alert is durably displayed there too.
+ * `text`. Ratatoskr renders a firing alert when no `text` is supplied; resolved
+ * lifecycle events are forwarded without rendering. Both are — best-effort —
+ * echoed to Heimdall's fail-closed `/api/alerts` ingest.
  *
  * Heimdall normalizes severity on its side ({info,warning,critical}) and dedups
  * by `dedup_key`. validateAlert rebuilds a clean, allowlisted envelope from the
@@ -46,33 +46,64 @@ function isSafeHttpUrl(url: string): boolean {
   return parsed.protocol === "http:" || parsed.protocol === "https:";
 }
 
-export interface AlertEnvelope {
+interface AlertEnvelopeFields {
   severity?: AlertSeverity;
   source?: string;
-  title: string;
   body?: string;
-  dedup_key?: string;
   ts?: string;
   links?: AlertLink[];
 }
 
+export interface FiringAlertEnvelope extends AlertEnvelopeFields {
+  state?: "firing";
+  title: string;
+  dedup_key?: string;
+}
+
+export interface ResolvedAlertEnvelope extends AlertEnvelopeFields {
+  state: "resolved";
+  title?: string;
+  dedup_key: string;
+}
+
+export type AlertEnvelope = FiringAlertEnvelope | ResolvedAlertEnvelope;
+
 /**
- * Validate an untrusted value as an AlertEnvelope. The only hard requirement is
- * a non-empty string `title`. Rather than returning the raw request object, this
- * constructs a fresh envelope containing only known fields that pass a type
- * check — so unknown/oversized/wrong-typed fields never reach the Telegram
- * render or the Heimdall echo. Returns null if the value is not a usable alert.
+ * Validate an untrusted value as an AlertEnvelope. Firing alerts require a
+ * non-empty title; resolution events require `state: "resolved"` and a non-empty
+ * dedup key. Rather than returning the raw request object, this constructs a
+ * fresh envelope containing only known fields that pass a type check — so
+ * unknown/oversized/wrong-typed fields never reach Telegram or Heimdall.
  */
 export function validateAlert(value: unknown): AlertEnvelope | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;
   }
   const a = value as Record<string, unknown>;
-  if (typeof a.title !== "string" || a.title.trim() === "") {
+
+  if (
+    a.state !== undefined &&
+    a.state !== "firing" &&
+    a.state !== "resolved"
+  ) {
+    return null;
+  }
+  const isResolved = a.state === "resolved";
+  const title = typeof a.title === "string" ? a.title.trim() : "";
+  const dedupKey =
+    typeof a.dedup_key === "string" ? a.dedup_key.trim() : "";
+  if ((!isResolved && title === "") || (isResolved && dedupKey === "")) {
     return null;
   }
 
-  const alert: AlertEnvelope = { title: a.title };
+  const alert: AlertEnvelope = isResolved
+    ? { state: "resolved", dedup_key: dedupKey }
+    : {
+        ...(a.state === "firing" ? { state: "firing" as const } : {}),
+        title: a.title as string,
+      };
+
+  if (isResolved && title !== "") alert.title = a.title as string;
 
   if (
     typeof a.severity === "string" &&
@@ -82,7 +113,9 @@ export function validateAlert(value: unknown): AlertEnvelope | null {
   }
   if (typeof a.source === "string") alert.source = a.source;
   if (typeof a.body === "string") alert.body = a.body;
-  if (typeof a.dedup_key === "string") alert.dedup_key = a.dedup_key;
+  if (!isResolved && typeof a.dedup_key === "string") {
+    alert.dedup_key = a.dedup_key;
+  }
   if (typeof a.ts === "string") alert.ts = a.ts;
 
   if (Array.isArray(a.links)) {
@@ -118,7 +151,7 @@ export function validateAlert(value: unknown): AlertEnvelope | null {
  * Defensive against non-validated input and self-bounds the result to Telegram's
  * length limit so an oversized alert never fails the send.
  */
-export function renderAlertText(alert: AlertEnvelope): string {
+export function renderAlertText(alert: FiringAlertEnvelope): string {
   const severity = (
     typeof alert.severity === "string" ? alert.severity : "info"
   ).toUpperCase();

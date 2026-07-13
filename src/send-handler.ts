@@ -55,13 +55,13 @@ export function createSendHandler(
 
     // Resolve the message to send: an explicit, non-blank `text` always wins and
     // preserves the legacy behavior (any `alert` is ignored for rendering but
-    // still echoed). Otherwise fall back to rendering a valid `alert` envelope.
+    // still echoed). Otherwise render a firing alert or transport a resolution.
     // Whitespace-only text falls through so a placeholder text alongside a real
     // alert renders the alert rather than 500ing on an empty Telegram message.
     const hasText = typeof text === "string" && text.trim().length > 0;
     const validAlert = alert !== undefined ? validateAlert(alert) : null;
 
-    let messageText: string;
+    let messageText: string | null;
     if (hasText) {
       messageText = text as string;
       // An alert was supplied but failed validation; text wins so it's silently
@@ -75,11 +75,19 @@ export function createSendHandler(
             : { invalidAlertType: Array.isArray(alert) ? "array" : typeof alert };
         logError("Alert supplied but invalid; not rendered or echoed", meta);
       }
+    } else if (validAlert?.state === "resolved") {
+      // A resolution is a Heimdall lifecycle event, not a firing alert to
+      // render. With no explicit text it traverses auth + allowlisting and is
+      // forwarded without generating a Telegram message.
+      messageText = null;
     } else if (validAlert) {
       messageText = renderAlertText(validAlert);
     } else if (alert !== undefined) {
       // An alert was supplied but is malformed, and there is no text fallback.
-      res.status(400).json({ error: "alert.title (string) is required" });
+      res.status(400).json({
+        error:
+          "alert requires a firing title or state=resolved with dedup_key",
+      });
       return;
     } else {
       res
@@ -93,12 +101,14 @@ export function createSendHandler(
       return;
     }
 
-    try {
-      await deps.sendMessage(chat_id, messageText);
-    } catch (err) {
-      logError("Failed to send Telegram message:", err);
-      res.status(500).json({ error: String(err) });
-      return;
+    if (messageText !== null) {
+      try {
+        await deps.sendMessage(chat_id, messageText);
+      } catch (err) {
+        logError("Failed to send Telegram message:", err);
+        res.status(500).json({ error: String(err) });
+        return;
+      }
     }
 
     // Best-effort echo to Heimdall — only when a valid alert was supplied and a

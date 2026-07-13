@@ -204,6 +204,25 @@ describe("POST /api/send route (integration via registerSendRoute)", () => {
     expect(sendMessage).toHaveBeenCalledWith(123, "hello");
   });
 
+  it("keyed bind rejects an unauthenticated resolution before forwarding", async () => {
+    const notifyHeimdall = vi.fn().mockResolvedValue(undefined);
+    const { app, sendMessage } = makeApp({
+      host: "0.0.0.0",
+      sendApiKey: "s3cret",
+      notifyHeimdall,
+    });
+    const res = await request(app)
+      .post("/api/send")
+      .send({
+        chat_id: 123,
+        alert: { state: "resolved", dedup_key: "hugin:auth" },
+      });
+
+    expect(res.status).toBe(401);
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(notifyHeimdall).not.toHaveBeenCalled();
+  });
+
   // --- Alert envelope (issue #16) -------------------------------------------
   it("alert-only (no text) → 200, sends rendered text from the envelope", async () => {
     const { app, sendMessage } = makeApp();
@@ -225,6 +244,33 @@ describe("POST /api/send route (integration via registerSendRoute)", () => {
       .send({ chat_id: 123, alert: { body: "no title here" } });
     expect(res.status).toBe(400);
     expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("explicit firing alert without title remains invalid", async () => {
+    const notifyHeimdall = vi.fn().mockResolvedValue(undefined);
+    const { app, sendMessage } = makeApp({ notifyHeimdall });
+    const res = await request(app)
+      .post("/api/send")
+      .send({
+        chat_id: 123,
+        alert: { state: "firing", dedup_key: "hugin:auth" },
+      });
+
+    expect(res.status).toBe(400);
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(notifyHeimdall).not.toHaveBeenCalled();
+  });
+
+  it("resolution without a nonempty dedup key is rejected", async () => {
+    const notifyHeimdall = vi.fn().mockResolvedValue(undefined);
+    const { app, sendMessage } = makeApp({ notifyHeimdall });
+    const res = await request(app)
+      .post("/api/send")
+      .send({ chat_id: 123, alert: { state: "resolved", dedup_key: "   " } });
+
+    expect(res.status).toBe(400);
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(notifyHeimdall).not.toHaveBeenCalled();
   });
 
   it("neither text nor alert → 400 with the original message (backwards compat)", async () => {
@@ -249,6 +295,49 @@ describe("POST /api/send route (integration via registerSendRoute)", () => {
     expect(res.status).toBe(403);
     expect(sendMessage).not.toHaveBeenCalled();
     expect(notifyHeimdall).not.toHaveBeenCalled();
+  });
+
+  it("resolution-only with disallowed chat_id → 403 and is not forwarded", async () => {
+    const notifyHeimdall = vi.fn().mockResolvedValue(undefined);
+    const { app, sendMessage } = makeApp({
+      allowedUsers: ["123"],
+      notifyHeimdall,
+    });
+    const res = await request(app)
+      .post("/api/send")
+      .send({
+        chat_id: 999,
+        alert: { state: "resolved", dedup_key: "hugin:auth" },
+      });
+
+    expect(res.status).toBe(403);
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(notifyHeimdall).not.toHaveBeenCalled();
+  });
+
+  it("authorized resolution-only request forwards state and key without Telegram rendering", async () => {
+    const notifyHeimdall = vi.fn().mockResolvedValue(undefined);
+    const { app, sendMessage } = makeApp({
+      host: "0.0.0.0",
+      sendApiKey: "s3cret",
+      notifyHeimdall,
+    });
+    const res = await request(app)
+      .post("/api/send")
+      .set("Authorization", "Bearer s3cret")
+      .send({
+        chat_id: 123,
+        alert: { state: "resolved", dedup_key: "  hugin:auth  " },
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(notifyHeimdall).toHaveBeenCalledOnce();
+    expect(notifyHeimdall).toHaveBeenCalledWith({
+      state: "resolved",
+      dedup_key: "hugin:auth",
+    });
   });
 
   it("text + alert → sends text (not the rendered alert), and echoes the alert", async () => {
