@@ -340,6 +340,43 @@ describe("POST /api/send route (integration via registerSendRoute)", () => {
     });
   });
 
+  it("resolution-only returns 503 when Heimdall forwarding is not configured", async () => {
+    const { app, sendMessage } = makeApp();
+    const res = await request(app)
+      .post("/api/send")
+      .send({
+        chat_id: 123,
+        alert: { state: "resolved", dedup_key: "hugin:auth" },
+      });
+
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({
+      error: "Heimdall alert resolution forwarding is not configured",
+    });
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("resolution-only returns 502 when Heimdall rejects so the producer retries", async () => {
+    const notifyHeimdall = vi
+      .fn()
+      .mockRejectedValue(new Error("heimdall unavailable"));
+    const { app, sendMessage, logError } = makeApp({ notifyHeimdall });
+    const res = await request(app)
+      .post("/api/send")
+      .send({
+        chat_id: 123,
+        alert: { state: "resolved", dedup_key: "hugin:auth" },
+      });
+
+    expect(res.status).toBe(502);
+    expect(res.body).toEqual({
+      error: "Failed to forward alert resolution to Heimdall",
+    });
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(notifyHeimdall).toHaveBeenCalledOnce();
+    expect(logError).toHaveBeenCalledOnce();
+  });
+
   it("text + alert → sends text (not the rendered alert), and echoes the alert", async () => {
     const notifyHeimdall = vi.fn().mockResolvedValue(undefined);
     const { app, sendMessage } = makeApp({ notifyHeimdall });
@@ -400,7 +437,7 @@ describe("POST /api/send route (integration via registerSendRoute)", () => {
     expect(sendMessage).toHaveBeenCalledWith(123, "INFO — Real");
   });
 
-  it("Heimdall echo failure is non-fatal → still 200, logged via logError", async () => {
+  it("firing alert keeps best-effort Heimdall semantics → echo failure still returns 200", async () => {
     const notifyHeimdall = vi
       .fn()
       .mockRejectedValue(new Error("heimdall down"));

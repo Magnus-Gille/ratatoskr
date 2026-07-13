@@ -14,9 +14,9 @@ export interface SendHandlerDeps {
   /** Error sink for send failures. Injectable so tests can assert/silence it. */
   logError?: (message: string, err: unknown) => void;
   /**
-   * Best-effort echo of an alert envelope to Heimdall's ingest. Optional —
-   * when unset (HEIMDALL_INGEST_URL unconfigured) the echo is skipped. A
-   * rejection here never fails the Telegram send (issue #16).
+   * Forward an alert envelope to Heimdall's ingest. Optional for firing and
+   * text-backed requests, where Telegram is the primary action; required for
+   * resolution-only requests, where it is the sole delivery path (issue #16).
    */
   notifyHeimdall?: (alert: AlertEnvelope) => Promise<void>;
 }
@@ -101,6 +101,15 @@ export function createSendHandler(
       return;
     }
 
+    const requiresHeimdallDelivery =
+      validAlert?.state === "resolved" && messageText === null;
+    if (requiresHeimdallDelivery && !deps.notifyHeimdall) {
+      res.status(503).json({
+        error: "Heimdall alert resolution forwarding is not configured",
+      });
+      return;
+    }
+
     if (messageText !== null) {
       try {
         await deps.sendMessage(chat_id, messageText);
@@ -111,13 +120,21 @@ export function createSendHandler(
       }
     }
 
-    // Best-effort echo to Heimdall — only when a valid alert was supplied and a
-    // notifier is configured. A failure here must NOT fail the request.
+    // Firing/text-backed alerts keep their historical best-effort echo because
+    // Telegram is their accepted primary action. Resolution-only events have no
+    // Telegram side effect, so Heimdall is the primary delivery: failures must
+    // surface to the producer so it can retry instead of recording false success.
     if (validAlert && deps.notifyHeimdall) {
       try {
         await deps.notifyHeimdall(validAlert);
       } catch (err) {
         logError("Failed to echo alert to Heimdall:", err);
+        if (requiresHeimdallDelivery) {
+          res.status(502).json({
+            error: "Failed to forward alert resolution to Heimdall",
+          });
+          return;
+        }
       }
     }
 

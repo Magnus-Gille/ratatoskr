@@ -3,8 +3,9 @@
  *
  * A caller may POST a standard `alert` envelope instead of (or alongside) raw
  * `text`. Ratatoskr renders a firing alert when no `text` is supplied; resolved
- * lifecycle events are forwarded without rendering. Both are — best-effort —
- * echoed to Heimdall's fail-closed `/api/alerts` ingest.
+ * lifecycle events are forwarded without rendering. Firing/text-backed echoes
+ * are best-effort; resolution-only forwarding must succeed because it is the
+ * request's sole side effect.
  *
  * Heimdall normalizes severity on its side ({info,warning,critical}) and dedups
  * by `dedup_key`. validateAlert rebuilds a clean, allowlisted envelope from the
@@ -196,8 +197,8 @@ export interface HeimdallNotifierOptions {
 
 /**
  * Build a function that POSTs an alert envelope to Heimdall's ingest. Throws on
- * a network error, timeout, or non-2xx response so the caller can log it — the
- * caller is responsible for treating the echo as best-effort (try/catch).
+ * a network error, timeout, or non-2xx response so the caller can apply the
+ * request-specific delivery policy.
  */
 export function createHeimdallNotifier(
   opts: HeimdallNotifierOptions

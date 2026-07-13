@@ -14,6 +14,9 @@ strict firing/resolved distinction: firing alerts still require a nonempty title
 Resolution-only `/api/send` requests still pass the existing Bearer-auth and
 Telegram chat allowlist gates, then forward the clean `{state:"resolved",
 dedup_key}` envelope to Heimdall without manufacturing a Telegram message.
+Because that path has no Telegram side effect, it fails closed with 503 when the
+notifier is unconfigured and 502 when Heimdall rejects, allowing producers to
+retry instead of recording a false recovery.
 Explicit text still wins and retains the existing send-before-best-effort-echo
 ordering. No producer keys or unrelated alert behavior were added.
 
