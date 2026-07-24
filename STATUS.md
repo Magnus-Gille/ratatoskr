@@ -237,7 +237,7 @@ sanitize NaN/≤0 config to safe defaults, evict empty limiter keys, `.env.examp
 
 ### Fix: resilient listener bind (PR #11, deployed)
 
-The `/api/send` listener binds the Pi's Tailscale IP (`HOST=100.97.117.37`).
+The `/api/send` listener binds the Pi's Tailscale IP (`HOST=100.100.100.100`).
 `app.listen` had no `'error'` handler, so an `EADDRNOTAVAIL` bind failure
 (tailscaled not up at boot, or a runtime tailnet blip) crash-looped the
 **whole process — the Telegram bot included**, even though the bot needs no
@@ -255,7 +255,7 @@ listener's resilience matters beyond remote-send.
   (doc drift — fixed in the same PR).
 - Commits: `020b46a` (fix), squashed from `d4d1c72` + `c95e827`.
 - **Deployed** to huginmunin via `deploy.sh` and verified live: `/health` 200 on
-  `100.97.117.37:3034`, `bot_connected:true`, clean first-try bind, no retries.
+  `100.100.100.100:3034`, `bot_connected:true`, clean first-try bind, no retries.
 
 ### Tests: `/api/send` integration tests + testable seam (branch, pending PR)
 

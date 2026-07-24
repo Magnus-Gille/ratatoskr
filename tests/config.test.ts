@@ -71,7 +71,7 @@ describe("config validation", () => {
 
   it("warns (does not exit) when HOST is non-loopback but no send key", async () => {
     setRequired();
-    process.env.HOST = "100.97.117.37"; // a Tailscale IP
+    process.env.HOST = "100.100.100.100"; // a Tailscale IP
     delete process.env.RATATOSKR_SEND_API_KEY;
 
     const { validateConfig } = await import("../src/config.js");
@@ -267,7 +267,7 @@ describe("isLocalHost", () => {
     expect(isLocalHost("http://10.0.0.5/x")).toBe(true);
     expect(isLocalHost("http://192.168.1.4/x")).toBe(true);
     expect(isLocalHost("http://172.16.0.9/x")).toBe(true);
-    expect(isLocalHost("http://100.97.117.37/x")).toBe(true); // Tailscale CGNAT
+    expect(isLocalHost("http://100.100.100.100/x")).toBe(true); // Tailscale CGNAT
   });
 
   it("treats public hosts/IPs as non-local", async () => {

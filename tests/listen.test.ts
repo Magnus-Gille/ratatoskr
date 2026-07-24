@@ -74,7 +74,7 @@ function makeFakeServer() {
   return server;
 }
 
-const HOST = "100.97.117.37";
+const HOST = "100.100.100.100";
 const PORT = 3034;
 
 describe("attachBindResilience", () => {
