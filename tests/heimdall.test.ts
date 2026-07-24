@@ -163,7 +163,7 @@ function makeApp(
     sendMessage: async () => {},
     allowedUsers: ["123"],
     sendApiKey: opts.sendApiKey ?? "test-key-abc",
-    host: opts.host ?? "100.97.117.37", // non-loopback → key enforced
+    host: opts.host ?? "100.100.100.100", // non-loopback → key enforced
   });
 
   return app;
@@ -322,14 +322,14 @@ describe("GET /heimdall.json — auth isolation", () => {
   it("is reachable WITHOUT the send API key (returns 200, not 401)", async () => {
     // Non-loopback host + send key set → /api/send is key-gated.
     // /heimdall.json must NOT be gated by the same middleware.
-    const app = makeApp({ sendApiKey: "secret-key", host: "100.97.117.37" });
+    const app = makeApp({ sendApiKey: "secret-key", host: "100.100.100.100" });
 
     const heimdall = await request(app).get("/heimdall.json");
     expect(heimdall.status).toBe(200);
   });
 
   it("POST /api/send without key returns 401 (confirms key IS enforced on that route)", async () => {
-    const app = makeApp({ sendApiKey: "secret-key", host: "100.97.117.37" });
+    const app = makeApp({ sendApiKey: "secret-key", host: "100.100.100.100" });
 
     const send = await request(app)
       .post("/api/send")

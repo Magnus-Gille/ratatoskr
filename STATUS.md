@@ -237,7 +237,7 @@ sanitize NaN/≤0 config to safe defaults, evict empty limiter keys, `.env.examp
 
 ### Fix: resilient listener bind (PR #11, deployed)
 
-The `/api/send` listener binds the Pi's Tailscale IP (`HOST=100.97.117.37`).
+The `/api/send` listener binds the Pi's Tailscale IP (`HOST=100.100.100.100`).
 `app.listen` had no `'error'` handler, so an `EADDRNOTAVAIL` bind failure
 (tailscaled not up at boot, or a runtime tailnet blip) crash-looped the
 **whole process — the Telegram bot included**, even though the bot needs no
@@ -255,7 +255,7 @@ listener's resilience matters beyond remote-send.
   (doc drift — fixed in the same PR).
 - Commits: `020b46a` (fix), squashed from `d4d1c72` + `c95e827`.
 - **Deployed** to huginmunin via `deploy.sh` and verified live: `/health` 200 on
-  `100.97.117.37:3034`, `bot_connected:true`, clean first-try bind, no retries.
+  `100.100.100.100:3034`, `bot_connected:true`, clean first-try bind, no retries.
 
 ### Tests: `/api/send` integration tests + testable seam (branch, pending PR)
 
@@ -359,19 +359,19 @@ Recon found the documented plan was stale; resolved all three:
   generated a shared token, set it on Heimdall (systemd drop-in) + Ratatoskr `.env`,
   verified wrong→401 / right→200.
 - **Voice (#1): LIVE** — reused the existing **KB-Whisper (Swedish)** server on m5,
-  rebound from loopback to the Tailscale IP (`100.76.72.59:8092`, `--convert`), wired
+  rebound from loopback to the Tailscale IP (`100.100.100.100:8092`, `--convert`), wired
   `RATATOSKR_TRANSCRIBE_URL` on the Pi. OGG→transcript + Pi→m5 path verified. (Note: an
   accidental overwrite of m5's `whisper-server.service` was caught + restored.)
 
 ## Next Steps
 - **✅ Voice (#1) confirmed LIVE** — m5 is back; `whisper-server.service` auto-recovered
-  tailnet-bound on `100.76.72.59:8092`, and a real Telegram voice note transcribed via
+  tailnet-bound on `100.100.100.100:8092`, and a real Telegram voice note transcribed via
   KB-Whisper and the bot replied (logs clean). Done.
 - **Optional live check:** exercise the alert-envelope path — `POST /api/send`
   `{chat_id, alert}` → Telegram + Heimdall strip (infra verified 401/200, not yet run
   with a real alert).
 - **m5 caveat:** KB-Whisper is now tailnet-bound (not loopback) — update any local-only
-  m5 consumer of `127.0.0.1:8092` to `100.76.72.59:8092`, or rebind `0.0.0.0`.
+  m5 consumer of `127.0.0.1:8092` to `100.100.100.100:8092`, or rebind `0.0.0.0`.
 - **#1 follow-up:** document routing (PDF/txt) — separate from transcription.
 - **Separate:** Munin consolidation worker flagged `failing` (the bot alerted on Telegram)
   — investigate in the Munin project.

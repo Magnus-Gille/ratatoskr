@@ -22,7 +22,7 @@ async function makeApp(opts: { sendApiKey?: string; host?: string } = {}) {
     queue,
     allowedUsers: ["123"],
     sendApiKey: opts.sendApiKey ?? "secret",
-    host: opts.host ?? "100.97.117.37",
+    host: opts.host ?? "100.100.100.100",
   });
   return { app, queue };
 }

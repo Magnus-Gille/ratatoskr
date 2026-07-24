@@ -131,7 +131,7 @@ describe("requireSendApiKey", () => {
   // A Tailscale IP is non-loopback, so the key is mandatory (fail-closed) and,
   // once configured, the Bearer token is enforced on that bind.
   it("(l) no key + Tailscale IP → 401 (endpoint disabled, fail-closed)", () => {
-    const mw = requireSendApiKey("", "100.97.117.37");
+    const mw = requireSendApiKey("", "100.100.100.100");
     const next = vi.fn();
     const res = makeRes();
     mw(makeReq("Bearer anything"), res, next);
@@ -144,7 +144,7 @@ describe("requireSendApiKey", () => {
   });
 
   it("(m) valid Bearer + key on Tailscale IP bind → next called", () => {
-    const mw = requireSendApiKey("s3nd-k3y", "100.97.117.37");
+    const mw = requireSendApiKey("s3nd-k3y", "100.100.100.100");
     const next = vi.fn();
     const res = makeRes();
     mw(makeReq("Bearer s3nd-k3y"), res, next);
