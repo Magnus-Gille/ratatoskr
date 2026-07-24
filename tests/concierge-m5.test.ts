@@ -15,7 +15,7 @@ vi.mock("../src/config.js", () => ({
   config: {
     anthropicApiKey: "test-key",
     conciergeModel: "claude-haiku-4-5-20251001",
-    triageUrl: "http://100.76.72.59:8080/delegate",
+    triageUrl: "http://100.100.100.100:8080/delegate",
     triageModel: "qwen3-30b-instruct",
     triageApiKey: "test-m5-key",
     triageTimeoutMs: 5000,
@@ -86,7 +86,7 @@ describe("triage via the M5 gateway (issue #31)", () => {
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     const [url, init] = (fetchImpl as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(url).toBe("http://100.76.72.59:8080/delegate");
+    expect(url).toBe("http://100.100.100.100:8080/delegate");
     expect(init.method).toBe("POST");
     expect(init.headers.Authorization).toBe("Bearer test-m5-key");
     expect(init.headers["Content-Type"]).toBe("application/json");

@@ -217,7 +217,7 @@ describe("config validation", () => {
 
   it("does not warn for a tailnet triage endpoint with a key set", async () => {
     setRequired();
-    process.env.RATATOSKR_TRIAGE_URL = "http://100.76.72.59:8080/delegate";
+    process.env.RATATOSKR_TRIAGE_URL = "http://100.100.100.100:8080/delegate";
     process.env.RATATOSKR_TRIAGE_API_KEY = "k";
 
     const { validateConfig } = await import("../src/config.js");
@@ -238,7 +238,7 @@ describe("config validation", () => {
 
   it("warns when the triage URL is set without an API key (owner-tier /delegate would 401)", async () => {
     setRequired();
-    process.env.RATATOSKR_TRIAGE_URL = "http://100.76.72.59:8080/delegate";
+    process.env.RATATOSKR_TRIAGE_URL = "http://100.100.100.100:8080/delegate";
     delete process.env.RATATOSKR_TRIAGE_API_KEY;
 
     const { validateConfig } = await import("../src/config.js");
