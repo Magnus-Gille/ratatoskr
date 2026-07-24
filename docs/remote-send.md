@@ -57,7 +57,7 @@ dead/unauthenticated endpoint:
 KEY=$(openssl rand -hex 32); echo "$KEY"
 
 # 2. Find this Pi's Tailscale IP
-TS_IP=$(tailscale ip -4); echo "$TS_IP"      # e.g. 100.97.117.37
+TS_IP=$(tailscale ip -4); echo "$TS_IP"      # e.g. 100.100.100.100
 
 # 3. Set both in the Pi's .env (NOT committed; deploy-pi.sh excludes it)
 cd ~/repos/ratatoskr
