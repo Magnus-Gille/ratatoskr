@@ -1,5 +1,21 @@
 # Ratatoskr Status
 
+**Current session:** 2026-07-26 — Ratatoskr #57 consumer-contract evidence
+
+Added a producer-side acceptance fixture pinned to
+`Magnus-Gille/heimdall@67d248dd547322867d78810bb914fd9d25fe2db4`
+(`src/alert-ingest.js`). It verifies that representative Ratatoskr firing and
+resolved envelopes satisfy Heimdall's current rules: title, canonical severity,
+source/body mapping, dedup identity, and the resolved lifecycle. The fixture
+also records the intentional advisory treatment of `ts` and `links`, which
+Heimdall accepts but does not persist.
+
+The consumer code is vendored byte-for-byte with SHA-256 provenance checks and
+executed hermetically with injected database operations. A bounded production
+metadata/receipt check remains open: no checked-in safe authenticated readback
+path exists, and this session did not probe production or create an alert solely
+for evidence.
+
 **Last session:** 2026-07-13 (Codex) — production dependency audit hardening
 **Branch:** `agent/express-audit-fix-20260713` (isolated worktree: `/private/tmp/ratatoskr-audit-express-20260713`)
 
