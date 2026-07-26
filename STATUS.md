@@ -1,6 +1,6 @@
 # Ratatoskr Status
 
-**Current session:** 2026-07-26 — Ratatoskr #57 consumer-contract evidence
+**Current session:** 2026-07-26 — Ratatoskr #57 consumer-contract evidence complete
 
 Added a producer-side acceptance fixture pinned to
 `Magnus-Gille/heimdall@67d248dd547322867d78810bb914fd9d25fe2db4`
@@ -12,9 +12,11 @@ Heimdall accepts but does not persist.
 
 The consumer code is vendored byte-for-byte with SHA-256 provenance checks and
 executed hermetically with injected database operations. A bounded production
-metadata/receipt check remains open: no checked-in safe authenticated readback
-path exists, and this session did not probe production or create an alert solely
-for evidence.
+receipt/readback completed at `2026-07-26T04:34:04.137Z`: the synthetic lifecycle
+was absent before firing, visible once after consumer acceptance, resolved once,
+and absent from the active set afterward. The repository evidence retains only
+timestamp/count/result metadata and no alert content, credentials, endpoints,
+or private locators.
 
 **Last session:** 2026-07-13 (Codex) — production dependency audit hardening
 **Branch:** `agent/express-audit-fix-20260713` (isolated worktree: `/private/tmp/ratatoskr-audit-express-20260713`)
