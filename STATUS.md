@@ -10,12 +10,11 @@ source/body mapping, dedup identity, and the resolved lifecycle. The fixture
 also records the intentional advisory treatment of `ts` and `links`, which
 Heimdall accepts but does not persist.
 
-Local checks: 386 tests passed (2 skipped), TypeScript build passed, and diff
-whitespace check passed. A bounded production metadata/receipt check remains
-open: no checked-in safe authenticated readback path exists, and this session
-did not probe production or create an alert solely for evidence. M5 bounded
-review was attempted but unavailable because the configured macOS Keychain item
-has no M5 token.
+The consumer code is vendored byte-for-byte with SHA-256 provenance checks and
+executed hermetically with injected database operations. A bounded production
+metadata/receipt check remains open: no checked-in safe authenticated readback
+path exists, and this session did not probe production or create an alert solely
+for evidence.
 
 **Last session:** 2026-07-13 (Codex) — production dependency audit hardening
 **Branch:** `agent/express-audit-fix-20260713` (isolated worktree: `/private/tmp/ratatoskr-audit-express-20260713`)

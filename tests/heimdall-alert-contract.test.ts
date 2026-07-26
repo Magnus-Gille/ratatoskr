@@ -1,83 +1,85 @@
 /**
  * Ratatoskr -> Heimdall alert-ingest consumer contract (issue #57).
  *
- * This is a pinned compatible copy of Heimdall's acceptance/normalization
- * boundary from Magnus-Gille/heimdall@67d248dd547322867d78810bb914fd9d25fe2db4,
- * src/alert-ingest.js: validateAlertEnvelope + handleAlertIngest semantics.
- * Keep the copy deliberately small: it covers the producer fields that pass
- * through Ratatoskr and the persistence calls that make the lifecycle visible.
- * Update this pin whenever Heimdall changes that contract.
+ * The consumer files in fixtures/heimdall-alert-ingest are byte-exact copies of:
+ *   Magnus-Gille/heimdall@67d248dd547322867d78810bb914fd9d25fe2db4
+ *   src/alert-ingest.js
+ *   src/fleet/auth.js
  *
- * Heimdall intentionally treats `ts` and `links` as advisory: it accepts them
- * but does not persist either field. Ratatoskr renders links only for Telegram;
- * producers must not claim that Heimdall stores or renders them.
+ * Only src/db.js is a test stub. Every database operation exercised below is
+ * injected through Heimdall's own handleAlertIngest options.
  */
-import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it, vi } from "vitest";
 import { validateAlert } from "../src/alert.js";
 
-const SEVERITY_CANON: Record<string, "info" | "warning" | "critical"> = {
-  info: "info", notice: "info", low: "info",
-  warn: "warning", warning: "warning", medium: "warning", degraded: "warning",
-  error: "critical", critical: "critical", crit: "critical", fail: "critical", high: "critical",
+const require = createRequire(import.meta.url);
+const fixtureRoot = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "fixtures",
+  "heimdall-alert-ingest",
+);
+const alertIngestPath = join(fixtureRoot, "src", "alert-ingest.js");
+const authPath = join(fixtureRoot, "src", "fleet", "auth.js");
+
+const EXPECTED_HASHES = {
+  "src/alert-ingest.js":
+    "1e4d03a33ef347c59f1521849daacf47472097527f9a6f4c92fc36573b3e9455",
+  "src/fleet/auth.js":
+    "b3797f97bae5aa58247cb23523e4fbae65722e95a384c891c2164a7d45a83f05",
+} as const;
+
+type HandleAlertIngest = (
+  db: object,
+  options: {
+    authHeader: string;
+    token: string;
+    bindHost: string;
+    body: unknown;
+    createAlertFn?: (...args: unknown[]) => number;
+    resolveAlertByDedupKeyFn?: (...args: unknown[]) => number;
+  },
+) => { status: number; body: Record<string, unknown> };
+
+const { handleAlertIngest } = require(alertIngestPath) as {
+  handleAlertIngest: HandleAlertIngest;
 };
 
-type ConsumerAlert = {
-  state: "firing" | "resolved";
-  host: string;
-  category: string;
-  severity: "info" | "warning" | "critical";
-  title: string;
-  detail: string | null;
-  dedup_key: string | null;
-  source: string | null;
+const AUTH = {
+  token: "fixture-token",
+  authHeader: "Bearer fixture-token",
+  bindHost: "192.0.2.1",
 };
 
-/** Exact pinned Heimdall validateAlertEnvelope behavior (sans CommonJS wrapper). */
-function acceptAtHeimdall(body: unknown): { ok: true; value: ConsumerAlert } | { ok: false; errors: string[] } {
-  if (!body || typeof body !== "object" || Array.isArray(body)) {
-    return { ok: false, errors: ["body must be a JSON object"] };
-  }
-  const outer = body as Record<string, unknown>;
-  const a = outer.alert && typeof outer.alert === "object" && !Array.isArray(outer.alert)
-    ? outer.alert as Record<string, unknown> : outer;
-  const errors: string[] = [];
-  const state = typeof a.state === "string" ? a.state.toLowerCase() : "firing";
-  if (state !== "firing" && state !== "resolved") errors.push("state must be firing or resolved");
-  const title = typeof a.title === "string" ? a.title.trim() : "";
-  if (state === "firing" && !title) errors.push("title is required for a firing alert");
-  if (title.length > 200) errors.push("title too long (max 200)");
-  const dedup_key = typeof a.dedup_key === "string" && a.dedup_key.trim()
-    ? a.dedup_key.trim().slice(0, 200) : null;
-  if (state === "resolved" && !dedup_key) errors.push("dedup_key is required for a resolved alert");
-  if (errors.length) return { ok: false, errors };
-
-  const rawSeverity = typeof a.severity === "string" && a.severity ? a.severity.toLowerCase() : "warn";
-  const source = typeof a.source === "string" && a.source ? a.source.slice(0, 120) : null;
-  const detail = typeof a.body === "string" ? a.body.slice(0, 2000)
-    : typeof a.detail === "string" ? a.detail.slice(0, 2000) : null;
-  return {
-    ok: true,
-    value: {
-      state,
-      host: typeof a.host === "string" && a.host ? a.host.slice(0, 120) : (source || "external"),
-      category: typeof a.category === "string" && a.category ? a.category.slice(0, 60) : "external",
-      severity: SEVERITY_CANON[rawSeverity] || "warning",
-      title,
-      detail,
-      dedup_key,
-      source,
-    },
-  };
+function sha256(bytes: Buffer): string {
+  return createHash("sha256").update(bytes).digest("hex");
 }
 
-function ingestLifecycle(activeKeys: Set<string>, alert: ConsumerAlert): number {
-  if (alert.state === "resolved") return activeKeys.delete(alert.dedup_key!) ? 1 : 0;
-  if (alert.dedup_key) activeKeys.add(alert.dedup_key);
-  return 1;
-}
+describe("vendored Heimdall consumer provenance", () => {
+  it("matches the pinned consumer source byte-for-byte", () => {
+    expect(sha256(readFileSync(alertIngestPath))).toBe(
+      EXPECTED_HASHES["src/alert-ingest.js"],
+    );
+    expect(sha256(readFileSync(authPath))).toBe(
+      EXPECTED_HASHES["src/fleet/auth.js"],
+    );
+  });
 
-describe("Ratatoskr alert envelopes accepted by Heimdall", () => {
-  it("accepts a firing lifecycle and preserves consumer-visible fields", () => {
+  it("detects a one-byte consumer drift mutation", () => {
+    const source = readFileSync(alertIngestPath);
+    const mutated = Buffer.from(source);
+    mutated[0] ^= 1;
+    expect(sha256(mutated)).not.toBe(EXPECTED_HASHES["src/alert-ingest.js"]);
+  });
+});
+
+describe("Ratatoskr envelopes through actual Heimdall consumer exports", () => {
+  it("normalizes and persists a firing alert with optional dedup identity", () => {
+    const createAlertFn = vi.fn(() => 41);
     const firing = validateAlert({
       title: "contract fixture firing",
       severity: "error",
@@ -87,50 +89,118 @@ describe("Ratatoskr alert envelopes accepted by Heimdall", () => {
       ts: "2026-07-26T00:00:00.000Z",
       links: [{ label: "advisory", url: "https://example.invalid/contract" }],
     });
-    expect(firing).not.toBeNull();
 
-    const accepted = acceptAtHeimdall(firing);
-    expect(accepted).toEqual({
-      ok: true,
-      value: {
-        state: "firing",
-        host: "ratatoskr",
-        category: "external",
-        severity: "critical",
-        title: "contract fixture firing",
-        detail: "consumer contract body",
+    const result = handleAlertIngest({}, {
+      ...AUTH,
+      body: firing,
+      createAlertFn,
+    });
+
+    expect(result).toEqual({
+      status: 200,
+      body: {
+        ok: true,
+        id: 41,
+        dedup_key: "ratatoskr:contract-fixture",
+      },
+    });
+    expect(createAlertFn).toHaveBeenCalledOnce();
+    expect(createAlertFn).toHaveBeenCalledWith(
+      {},
+      "ratatoskr",
+      "external",
+      "critical",
+      "contract fixture firing",
+      "consumer contract body",
+      {
         dedup_key: "ratatoskr:contract-fixture",
         source: "ratatoskr",
       },
-    });
+    );
   });
 
-  it("requires a dedup key for resolution and resolves by that same key", () => {
-    expect(acceptAtHeimdall({ state: "resolved" })).toEqual({
-      ok: false,
-      errors: ["dedup_key is required for a resolved alert"],
+  it("rejects resolution without a dedup key", () => {
+    const resolveAlertByDedupKeyFn = vi.fn(() => 0);
+    const result = handleAlertIngest({}, {
+      ...AUTH,
+      body: { state: "resolved" },
+      resolveAlertByDedupKeyFn,
     });
 
-    const resolution = validateAlert({ state: "resolved", dedup_key: " ratatoskr:contract-fixture " });
-    expect(resolution).toEqual({ state: "resolved", dedup_key: "ratatoskr:contract-fixture" });
-    const accepted = acceptAtHeimdall(resolution);
-    expect(accepted).toMatchObject({
-      ok: true,
-      value: { state: "resolved", dedup_key: "ratatoskr:contract-fixture" },
+    expect(result.status).toBe(400);
+    expect(result.body).toMatchObject({
+      error: "invalid alert",
+      details: ["dedup_key is required for a resolved alert"],
     });
+    expect(resolveAlertByDedupKeyFn).not.toHaveBeenCalled();
+  });
+
+  it("resolves by the normalized dedup key and remains idempotent", () => {
     const activeKeys = new Set(["ratatoskr:contract-fixture"]);
-    expect(accepted.ok && ingestLifecycle(activeKeys, accepted.value)).toBe(1);
-    expect(activeKeys).toEqual(new Set());
+    const resolveAlertByDedupKeyFn = vi.fn((_db: unknown, key: unknown) =>
+      activeKeys.delete(String(key)) ? 1 : 0,
+    );
+    const resolution = validateAlert({
+      state: "resolved",
+      dedup_key: " ratatoskr:contract-fixture ",
+    });
+
+    const first = handleAlertIngest({}, {
+      ...AUTH,
+      body: resolution,
+      resolveAlertByDedupKeyFn,
+    });
+    const repeated = handleAlertIngest({}, {
+      ...AUTH,
+      body: resolution,
+      resolveAlertByDedupKeyFn,
+    });
+
+    expect(first).toEqual({
+      status: 200,
+      body: {
+        ok: true,
+        resolved: 1,
+        dedup_key: "ratatoskr:contract-fixture",
+      },
+    });
+    expect(repeated).toEqual({
+      status: 200,
+      body: {
+        ok: true,
+        resolved: 0,
+        dedup_key: "ratatoskr:contract-fixture",
+      },
+    });
+    expect(resolveAlertByDedupKeyFn).toHaveBeenNthCalledWith(
+      1,
+      {},
+      "ratatoskr:contract-fixture",
+    );
   });
 
-  it("documents that accepted ts and links are advisory rather than persisted", () => {
-    const accepted = acceptAtHeimdall(validateAlert({
+  it("makes advisory ts and links observable as not persisted", () => {
+    const createAlertFn = vi.fn(() => 42);
+    const firing = validateAlert({
       title: "advisory fields",
       ts: "2026-07-26T00:00:00.000Z",
       links: [{ label: "advisory", url: "https://example.invalid/contract" }],
-    }));
-    expect(accepted).toMatchObject({ ok: true, value: { detail: null } });
-    expect(accepted).not.toHaveProperty("value.ts");
-    expect(accepted).not.toHaveProperty("value.links");
+    });
+
+    handleAlertIngest({}, {
+      ...AUTH,
+      body: firing,
+      createAlertFn,
+    });
+
+    expect(createAlertFn).toHaveBeenCalledWith(
+      {},
+      "external",
+      "external",
+      "warning",
+      "advisory fields",
+      null,
+      { dedup_key: null, source: null },
+    );
   });
 });
