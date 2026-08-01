@@ -6,49 +6,45 @@
     {
       "id": "document-storage-path",
       "kind": "retrieval",
-      "question": "A PDF arrives in Telegram and later needs to be handed to a Hugin task. Which part of Ratatoskr validates it, and where are the original bytes kept so the downstream task can read them?",
-      "expected_doc": "docs/architecture.md"
+      "prompt": "A PDF arrives in Telegram and later needs to be handed to a Hugin task. Which part of Ratatoskr validates it, and where are the original bytes kept so the downstream task can read them?",
+      "target": "docs/architecture.md"
     },
     {
       "id": "documents-feature-flag",
       "kind": "retrieval",
-      "question": "I want Ratatoskr to stop accepting uploaded documents entirely. Which setting turns that off, and what does it change?",
-      "expected_doc": "docs/environment.md"
+      "prompt": "I want Ratatoskr to stop accepting uploaded documents entirely. Which setting turns that off, and what does it change?",
+      "target": "docs/environment.md"
     },
     {
       "id": "m5-triage-config",
       "kind": "retrieval",
-      "question": "Which settings point text triage at the M5 gateway, pin the local model, and cap how long Ratatoskr waits before giving up on that path?",
-      "expected_doc": "docs/environment.md"
+      "prompt": "Which settings point text triage at the M5 gateway, pin the local model, and cap how long Ratatoskr waits before giving up on that path?",
+      "target": "docs/environment.md"
     },
     {
       "id": "remote-send-setup",
       "kind": "retrieval",
-      "question": "How do I make my laptop send a Telegram ping through Ratatoskr without SSHing into the Pi?",
-      "expected_doc": "docs/remote-send.md"
+      "prompt": "How do I make my laptop send a Telegram ping through Ratatoskr without SSHing into the Pi?",
+      "target": "docs/remote-send.md"
     },
     {
       "id": "reminder-crash-window",
       "kind": "retrieval",
-      "question": "What happens if a reminder becomes due and Ratatoskr crashes right after it marks the reminder as sending?",
-      "expected_doc": "docs/reminders.md"
+      "prompt": "What happens if a reminder becomes due and Ratatoskr crashes right after it marks the reminder as sending?",
+      "target": "docs/reminders.md"
     },
     {
       "id": "alert-lifecycle-evidence",
       "kind": "retrieval",
-      "question": "Do we have a recorded production proof that Ratatoskr can fire an alert into Heimdall and then resolve it cleanly?",
-      "expected_doc": "docs/alert-consumer-evidence-2026-07-26.md"
+      "prompt": "Do we have a recorded production proof that Ratatoskr can fire an alert into Heimdall and then resolve it cleanly?",
+      "target": "docs/alert-consumer-evidence-2026-07-26.md"
     },
     {
       "id": "m5-triage-fallback-CONTROL",
       "kind": "control",
-      "question": "If the M5 text-triage path errors or times out, what must Ratatoskr do with the incoming message?",
-      "expected_inline": "AGENTS.md",
-      "assertions": [
-        "never drop a message",
-        "fall back to the Anthropic path on any gateway failure or timeout",
-        "keep strict parse semantics on the M5 lane"
-      ]
+      "prompt": "If the M5 text-triage path errors or times out, what must Ratatoskr do with the incoming message?",
+      "target": "AGENTS.md",
+      "assert_regex": "never drop a message(.|[\\r\\n])*gateway failure(.|[\\r\\n])*timeout(.|[\\r\\n])*anthropic path(.|[\\r\\n])*strict parse(.|[\\r\\n])*(local|m5) lane(.|[\\r\\n])*fully valid triage decision"
     }
   ]
 }
