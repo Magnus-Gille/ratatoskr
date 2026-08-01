@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-08-01",
+  "purpose": "Frozen probe set for AGENTS.md reference-material extraction A/B validation (issue #56).",
+  "probes": [
+    {
+      "id": "document-storage-path",
+      "kind": "retrieval",
+      "question": "A PDF arrives in Telegram and later needs to be handed to a Hugin task. Which part of Ratatoskr validates it, and where are the original bytes kept so the downstream task can read them?",
+      "expected_doc": "docs/architecture.md"
+    },
+    {
+      "id": "documents-feature-flag",
+      "kind": "retrieval",
+      "question": "I want Ratatoskr to stop accepting uploaded documents entirely. Which setting turns that off, and what does it change?",
+      "expected_doc": "docs/environment.md"
+    },
+    {
+      "id": "m5-triage-config",
+      "kind": "retrieval",
+      "question": "Which settings point text triage at the M5 gateway, pin the local model, and cap how long Ratatoskr waits before giving up on that path?",
+      "expected_doc": "docs/environment.md"
+    },
+    {
+      "id": "remote-send-setup",
+      "kind": "retrieval",
+      "question": "How do I make my laptop send a Telegram ping through Ratatoskr without SSHing into the Pi?",
+      "expected_doc": "docs/remote-send.md"
+    },
+    {
+      "id": "reminder-crash-window",
+      "kind": "retrieval",
+      "question": "What happens if a reminder becomes due and Ratatoskr crashes right after it marks the reminder as sending?",
+      "expected_doc": "docs/reminders.md"
+    },
+    {
+      "id": "alert-lifecycle-evidence",
+      "kind": "retrieval",
+      "question": "Do we have a recorded production proof that Ratatoskr can fire an alert into Heimdall and then resolve it cleanly?",
+      "expected_doc": "docs/alert-consumer-evidence-2026-07-26.md"
+    },
+    {
+      "id": "m5-triage-fallback-CONTROL",
+      "kind": "control",
+      "question": "If the M5 text-triage path errors or times out, what must Ratatoskr do with the incoming message?",
+      "expected_inline": "AGENTS.md",
+      "assertions": [
+        "never drop a message",
+        "fall back to the Anthropic path on any gateway failure or timeout",
+        "keep strict parse semantics on the M5 lane"
+      ]
+    }
+  ]
+}
