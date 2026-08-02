@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-08-01",
+  "purpose": "Frozen probe set for AGENTS.md reference-material extraction A/B validation (issue #56).",
+  "probes": [
+    {
+      "id": "document-storage-path",
+      "kind": "retrieval",
+      "prompt": "A PDF arrives in Telegram and later needs to be handed to a Hugin task. Which part of Ratatoskr validates it, and where are the original bytes kept so the downstream task can read them?",
+      "target": "docs/architecture.md"
+    },
+    {
+      "id": "documents-feature-flag",
+      "kind": "retrieval",
+      "prompt": "I want Ratatoskr to stop accepting uploaded documents entirely. Which setting turns that off, and what does it change?",
+      "target": "docs/environment.md"
+    },
+    {
+      "id": "m5-triage-config",
+      "kind": "retrieval",
+      "prompt": "Which settings point text triage at the M5 gateway, pin the local model, and cap how long Ratatoskr waits before giving up on that path?",
+      "target": "docs/environment.md"
+    },
+    {
+      "id": "remote-send-setup",
+      "kind": "retrieval",
+      "prompt": "How do I make my laptop send a Telegram ping through Ratatoskr without SSHing into the Pi?",
+      "target": "docs/remote-send.md"
+    },
+    {
+      "id": "reminder-crash-window",
+      "kind": "retrieval",
+      "prompt": "What happens if a reminder becomes due and Ratatoskr crashes right after it marks the reminder as sending?",
+      "target": "docs/reminders.md"
+    },
+    {
+      "id": "alert-lifecycle-evidence",
+      "kind": "retrieval",
+      "prompt": "Do we have a recorded production proof that Ratatoskr can fire an alert into Heimdall and then resolve it cleanly?",
+      "target": "docs/alert-consumer-evidence-2026-07-26.md"
+    },
+    {
+      "id": "m5-triage-fallback-CONTROL",
+      "kind": "control",
+      "prompt": "If the M5 text-triage path errors or times out, what must Ratatoskr do with the incoming message?",
+      "target": "AGENTS.md",
+      "assert_regex": "never drop a message(.|[\\r\\n])*gateway failure(.|[\\r\\n])*timeout(.|[\\r\\n])*anthropic path(.|[\\r\\n])*strict parse(.|[\\r\\n])*(local|m5) lane(.|[\\r\\n])*fully valid triage decision"
+    }
+  ]
+}
