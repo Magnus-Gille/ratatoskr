@@ -11,7 +11,7 @@ these docs for lookup material.
   task flow, reminders, alerts, transcription, document storage, health, and
   recovery.
 - `environment.md` — the full runtime configuration table for
-  `TELEGRAM_*`, `MUNIN_*`, `CONCIERGE_MODEL`, `RATATOSKR_*`, and
+  `TELEGRAM_*`, `MUNIN_*`, `CONCIERGE_MODEL`, `LLM_*`, `RATATOSKR_*`, and
   `HEIMDALL_*`.
 
 ## Operations

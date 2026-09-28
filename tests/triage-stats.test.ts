@@ -28,7 +28,7 @@ describe("TriageStats", () => {
     expect(stats.snapshot()).toEqual({
       total: 0,
       byAction: { ready: 0, clarify: 0, answer: 0 },
-      byBackend: { m5: 0, anthropic: 0 },
+      byBackend: { m5: 0, anthropic: 0, "openai-compatible": 0 },
       m5Fallbacks: 0,
       avgLatencyMs: 0,
       avgInputTokens: 0,
@@ -42,7 +42,7 @@ describe("TriageStats", () => {
     expect(stats.snapshot()).toEqual({
       total: 1,
       byAction: { ready: 1, clarify: 0, answer: 0 },
-      byBackend: { m5: 0, anthropic: 1 },
+      byBackend: { m5: 0, anthropic: 1, "openai-compatible": 0 },
       m5Fallbacks: 0,
       avgLatencyMs: 100,
       avgInputTokens: 50,
@@ -78,7 +78,11 @@ describe("TriageStats", () => {
     stats.record("answer", meta({ backend: "m5" }));
     stats.record("answer", meta({ backend: "m5" }));
     stats.record("ready", meta({ backend: "anthropic" }));
-    expect(stats.snapshot().byBackend).toEqual({ m5: 2, anthropic: 1 });
+    expect(stats.snapshot().byBackend).toEqual({
+      m5: 2,
+      anthropic: 1,
+      "openai-compatible": 0,
+    });
   });
 
   it("counts M5→Anthropic fallbacks separately from plain Anthropic decisions", () => {

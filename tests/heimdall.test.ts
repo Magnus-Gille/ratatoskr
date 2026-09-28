@@ -116,7 +116,7 @@ const HEALTHY_STATE: DescriptorState = {
   triage: {
     total: 7,
     byAction: { ready: 3, clarify: 1, answer: 3 },
-    byBackend: { m5: 5, anthropic: 2 },
+    byBackend: { m5: 5, anthropic: 2, "openai-compatible": 0 },
     m5Fallbacks: 1,
     avgLatencyMs: 842,
     avgInputTokens: 310,
@@ -131,7 +131,7 @@ const DOWN_STATE: DescriptorState = {
   triage: {
     total: 0,
     byAction: { ready: 0, clarify: 0, answer: 0 },
-    byBackend: { m5: 0, anthropic: 0 },
+    byBackend: { m5: 0, anthropic: 0, "openai-compatible": 0 },
     m5Fallbacks: 0,
     avgLatencyMs: 0,
     avgInputTokens: 0,

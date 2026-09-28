@@ -130,6 +130,7 @@ describe("buildTriageLogEntry", () => {
     const content = JSON.parse(entry.content);
     expect(content.backend).toBe("m5");
     expect(content.fallback).toBe(false);
+    expect(content.providerFallback).toBe(false);
     expect(content.attempts).toEqual([
       {
         backend: "m5",
@@ -173,6 +174,22 @@ describe("buildTriageLogEntry", () => {
     expect(content.attempts[0].errorClass).toBe("timeout");
     expect(entry.tags).toContain("backend:anthropic");
     expect(entry.tags).toContain("fallback:m5");
+  });
+
+  it("records an LLM provider fallback separately from an M5 fallback", () => {
+    const entry = buildTriageLogEntry(
+      "answer",
+      makeMeta({
+        backend: "openai-compatible",
+        model: "fallback-model",
+        providerFallback: true,
+      })
+    );
+
+    const content = JSON.parse(entry.content);
+    expect(content.providerFallback).toBe(true);
+    expect(entry.tags).toContain("fallback:llm");
+    expect(entry.tags).not.toContain("fallback:m5");
   });
 });
 

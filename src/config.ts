@@ -45,6 +45,22 @@ export const config = {
     .filter(Boolean),
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || "",
   conciergeModel: process.env.CONCIERGE_MODEL || "claude-haiku-4-5-20251001",
+  llmProvider: process.env.LLM_PROVIDER || "anthropic",
+  llmBaseUrl: process.env.LLM_BASE_URL || "",
+  llmApiKey: process.env.LLM_API_KEY || "",
+  llmModel: process.env.LLM_MODEL || "",
+  llmFallbackBaseUrl: process.env.LLM_FALLBACK_BASE_URL || "",
+  llmFallbackApiKey: process.env.LLM_FALLBACK_API_KEY || "",
+  llmFallbackModel: process.env.LLM_FALLBACK_MODEL || "",
+  llmPrimaryTimeoutMs: positiveIntEnv(process.env.LLM_PRIMARY_TIMEOUT_MS, 20000),
+  llmPrimaryTimeoutMsExplicit:
+    process.env.LLM_PRIMARY_TIMEOUT_MS !== undefined &&
+    process.env.LLM_PRIMARY_TIMEOUT_MS !== "" &&
+    !isInvalidPositiveInt(process.env.LLM_PRIMARY_TIMEOUT_MS),
+  llmFallbackTimeoutMs: positiveIntEnv(
+    process.env.LLM_FALLBACK_TIMEOUT_MS,
+    60000
+  ),
   muninUrl: process.env.MUNIN_URL || "http://localhost:3030",
   muninApiKey: process.env.MUNIN_API_KEY || "",
   pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || "30000"),
@@ -153,17 +169,69 @@ export function isLocalHost(urlStr: string): boolean {
   return false; // a public hostname/IP
 }
 
-// Mirrors LOOPBACK_HOSTS in auth.ts — kept local so config validation has no
-// dependency on the auth layer. Wildcard binds expose every interface.
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
+function normalizedHostname(hostname: string): string {
+  return hostname.replace(/^\[|\]$/g, "").toLowerCase();
+}
+
+function ipv4Parts(hostname: string): number[] | null {
+  const parts = hostname.split(".");
+  if (parts.length !== 4 || parts.some((part) => !/^\d+$/.test(part))) {
+    return null;
+  }
+  const numbers = parts.map(Number);
+  return numbers.every((part) => part >= 0 && part <= 255) ? numbers : null;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = normalizedHostname(hostname);
+  if (normalized === "localhost" || normalized === "::1") return true;
+  return ipv4Parts(normalized)?.[0] === 127;
+}
+
+function isProtectedHttpHostname(hostname: string): boolean {
+  const normalized = normalizedHostname(hostname);
+  if (isLoopbackHostname(normalized)) return true;
+  const parts = ipv4Parts(normalized);
+  if (!parts) return false;
+  const [a, b] = parts;
+  return (
+    a === 10 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 100 && b >= 64 && b <= 127)
+  );
+}
+
+// Kept local so config validation has no dependency on the auth layer.
+// Wildcard binds expose every interface.
 const WILDCARD_HOSTS = new Set(["0.0.0.0", "::"]);
 
 export function validateConfig(): void {
   const required: { key: keyof typeof config; label: string }[] = [
     { key: "telegramBotToken", label: "TELEGRAM_BOT_TOKEN" },
-    { key: "anthropicApiKey", label: "ANTHROPIC_API_KEY" },
     { key: "muninApiKey", label: "MUNIN_API_KEY" },
   ];
+
+  if (![
+    "anthropic",
+    "openai-compatible",
+  ].includes(config.llmProvider)) {
+    console.error(
+      "LLM_PROVIDER must be either anthropic or openai-compatible"
+    );
+    process.exit(1);
+  }
+
+  if (config.llmProvider === "anthropic") {
+    required.push({ key: "anthropicApiKey", label: "ANTHROPIC_API_KEY" });
+  } else {
+    if (!config.llmBaseUrl) {
+      required.push({ key: "llmBaseUrl", label: "LLM_BASE_URL" });
+    }
+    if (!config.llmModel) {
+      required.push({ key: "llmModel", label: "LLM_MODEL" });
+    }
+  }
 
   const missing = required.filter((r) => !config[r.key]);
   if (missing.length > 0) {
@@ -171,6 +239,19 @@ export function validateConfig(): void {
       `Missing required env vars: ${missing.map((m) => m.label).join(", ")}`
     );
     process.exit(1);
+  }
+
+  if (config.llmProvider === "openai-compatible") {
+    validateLlmUrl(config.llmBaseUrl, "LLM_BASE_URL");
+    validateLlmCredentials(config.llmBaseUrl, config.llmApiKey, "LLM_API_KEY");
+  }
+  if (config.llmFallbackBaseUrl) {
+    validateLlmUrl(config.llmFallbackBaseUrl, "LLM_FALLBACK_BASE_URL");
+    validateLlmCredentials(
+      config.llmFallbackBaseUrl,
+      config.llmFallbackApiKey,
+      "LLM_FALLBACK_API_KEY"
+    );
   }
 
   if (config.allowedUsers.length === 0) {
@@ -183,7 +264,7 @@ export function validateConfig(): void {
   // Remote-send posture (see docs/remote-send.md). Non-fatal — the bot must keep
   // serving Telegram even when /api/send is fail-closed, and a misconfig here
   // should be loud at boot rather than surface only as a runtime 401.
-  if (!LOOPBACK_HOSTS.has(config.host)) {
+  if (!isLoopbackHostname(config.host)) {
     if (!config.sendApiKey) {
       console.warn(
         `⚠️  HOST=${config.host} is non-loopback but RATATOSKR_SEND_API_KEY is unset — ` +
@@ -264,5 +345,45 @@ export function validateConfig(): void {
         `gateway's /delegate endpoint is owner-tier-only, so every triage call will fail ` +
         `and fall back to Anthropic until the key is set.`
     );
+  }
+}
+
+function validateLlmUrl(value: string, label: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    console.error(`${label} must be a valid http(s) URL`);
+    process.exit(1);
+    return;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    console.error(`${label} must use http or https`);
+    process.exit(1);
+    return;
+  }
+  if (parsed.protocol === "http:" && !isProtectedHttpHostname(parsed.hostname)) {
+    console.error(
+      `${label} must use HTTPS for public endpoints; plain HTTP is allowed only ` +
+        `for loopback, RFC1918 private, or Tailscale addresses`
+    );
+    process.exit(1);
+  }
+}
+
+function validateLlmCredentials(
+  url: string,
+  apiKey: string,
+  label: string
+): void {
+  let loopback = false;
+  try {
+    loopback = isLoopbackHostname(new URL(url).hostname);
+  } catch {
+    // URL syntax is validated separately; fail closed if this helper is called alone.
+  }
+  if (url && !loopback && !apiKey) {
+    console.error(`${label} is required for a non-loopback LLM endpoint`);
+    process.exit(1);
   }
 }

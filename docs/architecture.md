@@ -4,8 +4,9 @@
 
 - **Runtime:** Node.js 20+, TypeScript (strict mode)
 - **Framework:** Express (health endpoint only) + grammy (Telegram bot)
-- **AI:** `@anthropic-ai/sdk` (Haiku for concierge triage and summarization)
-- **Deployment:** systemd on Pi 1 (`huginmunin`), port `3034`
+- **AI:** Anthropic by default, with an optional OpenAI-compatible concierge provider
+  and configured fallback; summarization uses the same adapter
+- **Deployment:** systemd on a private deployment host, port `3034`
 - **Telegram mode:** long-polling only; no inbound webhook
 
 ## Request flow
@@ -26,6 +27,8 @@
   submit/clarify/answer for all input types, and fire-and-forget logs each
   triage decision to Munin (`ratatoskr/triage`) + records it in `TriageStats`
   (issue #27)
+- `src/llm-adapter.ts` — provider-neutral request/response adapter for Anthropic
+  and OpenAI-compatible chat-completions endpoints, including tool-call translation
 - `src/concierge.ts` — intent triage (multimodal: text + images) + result
   summarization. Text triage classification routes through the M5 gateway's
   `POST /delegate` when `RATATOSKR_TRIAGE_URL` is set (issue #31) — the gateway

@@ -3,7 +3,7 @@ import type { TriageAction, TriageBackend, TriageMeta } from "./concierge.js";
 export interface TriageStatsSnapshot {
   total: number;
   byAction: Record<TriageAction, number>;
-  /** Which backend served each decision (issue #31) — M5 gateway vs Anthropic. */
+  /** Which backend served each decision (issue #31/#62). */
   byBackend: Record<TriageBackend, number>;
   /** M5 attempted but Anthropic served — the degraded-path counter (issue #31). */
   m5Fallbacks: number;
@@ -28,6 +28,7 @@ export class TriageStats {
   private byBackend: Record<TriageBackend, number> = {
     m5: 0,
     anthropic: 0,
+    "openai-compatible": 0,
   };
   private m5Fallbacks = 0;
   private latencySum = 0;

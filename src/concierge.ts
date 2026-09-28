@@ -2,6 +2,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import { config } from "./config.js";
 import { MuninClient } from "./munin-client.js";
 import { RATATOSKR_SOUL } from "./soul.js";
+import {
+  callLLM,
+  type LLMProvider,
+  type LLMMessage,
+} from "./llm-adapter.js";
 import type { TrackedMessage } from "./message-tracker.js";
 import type { ConciergeDocument } from "./document.js";
 import {
@@ -16,12 +21,14 @@ export interface ConciergeDeps {
   fetchImpl?: typeof fetch;
   abortContext?: AbortContext;
   anthropicTimeoutMs?: number;
+  llmPrimaryTimeoutMs?: number;
+  llmFallbackTimeoutMs?: number;
 }
 
 export type TriageAction = "ready" | "clarify" | "answer";
 
 /** Which runtime served (or attempted) a triage classification (issue #31). */
-export type TriageBackend = "m5" | "anthropic";
+export type TriageBackend = "m5" | LLMProvider;
 
 /**
  * One routing attempt for a triage decision — the routing-outcome record the
@@ -50,6 +57,8 @@ export interface TriageMeta {
   backend: TriageBackend;
   /** True when the M5 gateway was attempted but Anthropic served (degraded path). */
   fallback: boolean;
+  /** True when the configured primary LLM failed and its LLM fallback served. */
+  providerFallback?: boolean;
   latencyMs: number;
   inputTokens: number;
   outputTokens: number;
@@ -220,6 +229,7 @@ function buildSystemContent(
   return systemContent;
 }
 
+
 /**
  * Parse a model's triage output into a decision. `lenient` preserves the
  * historical Anthropic-path behavior of rescuing a bare {reply}/{question}
@@ -359,6 +369,80 @@ class M5TriageError extends Error {
     super(message);
     this.name = "M5TriageError";
   }
+}
+
+function primaryModel(): string {
+  return config.llmProvider === "openai-compatible" && config.llmModel
+    ? config.llmModel
+    : config.conciergeModel;
+}
+
+function primaryTimeoutMs(
+  deps: Pick<ConciergeDeps, "anthropicTimeoutMs" | "llmPrimaryTimeoutMs">,
+  anthropicDefaultMs: number
+): number {
+  if (deps.llmPrimaryTimeoutMs !== undefined) {
+    return deps.llmPrimaryTimeoutMs;
+  }
+  if (config.llmProvider === "anthropic") {
+    if (config.llmPrimaryTimeoutMsExplicit) {
+      return config.llmPrimaryTimeoutMs;
+    }
+    return deps.anthropicTimeoutMs ?? anthropicDefaultMs;
+  }
+  return config.llmPrimaryTimeoutMs;
+}
+
+function configuredLlmDestination(): string {
+  if (config.llmProvider === "openai-compatible") {
+    // Never log the endpoint URL: it may carry userinfo or query credentials.
+    const model = config.llmModel || "configured model";
+    return "OpenAI-compatible provider (" + model + ")";
+  }
+  return "Anthropic (" + config.conciergeModel + ")";
+}
+
+function unsupportedOpenAIAttachmentResult(
+  documents: ConciergeDocument[] | undefined,
+  modelOverride?: string
+): TriageResult | null {
+  if (!documents?.some((document) => document.kind !== "text")) {
+    return null;
+  }
+  const model = modelOverride ?? primaryModel();
+  return {
+    action: "answer",
+    reply:
+      "PDF attachments are not supported by the configured OpenAI-compatible provider. " +
+      "Please send a plain-text document or switch to an Anthropic provider.",
+    meta: {
+      model,
+      backend: "openai-compatible",
+      fallback: false,
+      latencyMs: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      attempts: [
+        {
+          backend: "openai-compatible",
+          model,
+          outcome: "error",
+          errorClass: "infra",
+          latencyMs: 0,
+          error: "unsupported attachment",
+        },
+      ],
+    },
+  };
+}
+
+function hasErrorNamed(error: unknown, name: string): boolean {
+  let current: unknown = error;
+  while (current instanceof Error) {
+    if (current.name === name) return true;
+    current = current.cause;
+  }
+  return false;
 }
 
 /** Subset of the gateway's DelegationOutcome that the triage path consumes. */
@@ -531,6 +615,11 @@ export async function triage(
   const systemContent = buildSystemContent(muninContext, replyContext);
   const attempts: TriageAttempt[] = [];
   const abortContext = deps?.abortContext ?? runtimeAbort;
+  const unsupportedAttachment =
+    config.llmProvider === "openai-compatible"
+      ? unsupportedOpenAIAttachmentResult(documents)
+      : null;
+  if (unsupportedAttachment) return unsupportedAttachment;
 
   // M5 gateway path (issue #31): text-only triage classification. Image triage
   // stays on Anthropic — vision on the local /delegate lane is untested, and a
@@ -583,12 +672,10 @@ export async function triage(
       // identical to a healthy one. Descriptor counter comes via TriageStats.
       console.warn(
         `⚠️  M5 triage gateway failed (${errorClass}: ${errorMessage}) — ` +
-          `falling back to Anthropic (${config.conciergeModel})`
+          `falling back to ${configuredLlmDestination()}`
       );
     }
   }
-
-  const client = new Anthropic({ apiKey: config.anthropicApiKey });
 
   // Build the final user message
   const userContent: Anthropic.ContentBlockParam[] = [];
@@ -651,46 +738,68 @@ export async function triage(
   ];
 
   const startedAt = Date.now();
-  const anthropicTimeoutMs =
-    deps?.anthropicTimeoutMs ?? ANTHROPIC_REQUEST_TIMEOUT_MS;
-  const anthropicSignal = abortContext.deadline(anthropicTimeoutMs);
-  let response: Awaited<ReturnType<typeof client.messages.create>>;
-  try {
-    response = await client.messages.create(
+  let servedBackend: TriageBackend = "anthropic";
+  let servedModel = config.conciergeModel;
+  let providerFallback = false;
+  const callConcierge = (llmMessages: LLMMessage[]) =>
+    callLLM(
       {
-        model: config.conciergeModel,
+        model: primaryModel(),
         max_tokens: 1024,
         system: systemContent,
-        messages,
+        messages: [...llmMessages],
       },
-      { signal: anthropicSignal }
+      {
+        fetchImpl: deps?.fetchImpl,
+        abortContext,
+        primaryTimeoutMs: primaryTimeoutMs(
+          deps ?? {},
+          ANTHROPIC_REQUEST_TIMEOUT_MS
+        ),
+        fallbackTimeoutMs: deps?.llmFallbackTimeoutMs,
+        onServed: ({ provider, model, fallback }) => {
+          servedBackend = provider;
+          servedModel = model;
+          providerFallback = fallback;
+        },
+      }
     );
+
+  const llmMessages = messages as unknown as LLMMessage[];
+  let response: Awaited<ReturnType<typeof callLLM>>;
+  try {
+    response = await callConcierge(llmMessages);
   } catch (err) {
-    throw abortContext.normalize(
-      err,
-      anthropicSignal,
-      "Anthropic triage request",
-      anthropicTimeoutMs
-    );
+    if (
+      documents?.some((document) => document.kind !== "text") &&
+      hasErrorNamed(err, "LLMConfigurationError")
+    ) {
+      const unsupportedFallback = unsupportedOpenAIAttachmentResult(
+        documents,
+        config.llmFallbackModel || primaryModel()
+      );
+      if (unsupportedFallback) return unsupportedFallback;
+    }
+    throw err;
   }
   const latencyMs = Date.now() - startedAt;
 
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
+  const text = response.content[0]?.type === "text" ? response.content[0].text : "";
   const decision = parseTriageDecision(text, { lenient: true });
 
   attempts.push({
-    backend: "anthropic",
-    model: config.conciergeModel,
+    backend: servedBackend,
+    model: servedModel,
     outcome: "pass",
     latencyMs,
   });
   const meta: TriageMeta = {
-    model: config.conciergeModel,
-    backend: "anthropic",
+    model: servedModel,
+    backend: servedBackend,
     // fallback=true only when an M5 attempt preceded this (degraded path);
     // feature-off and image triage are healthy Anthropic-served decisions.
     fallback: attempts.length > 1,
+    ...(providerFallback ? { providerFallback: true } : {}),
     latencyMs,
     inputTokens: response.usage?.input_tokens ?? 0,
     outputTokens: response.usage?.output_tokens ?? 0,
@@ -706,35 +815,28 @@ export async function triage(
  */
 export async function summarizeResult(
   body: string,
-  deps: Pick<ConciergeDeps, "abortContext" | "anthropicTimeoutMs"> = {}
+  deps: Pick<
+    ConciergeDeps,
+    "abortContext" | "anthropicTimeoutMs" | "llmPrimaryTimeoutMs" | "llmFallbackTimeoutMs"
+  > = {}
 ): Promise<string> {
-  const client = new Anthropic({ apiKey: config.anthropicApiKey });
-
   const abortContext = deps.abortContext ?? runtimeAbort;
-  const timeoutMs = deps.anthropicTimeoutMs ?? ANTHROPIC_REQUEST_TIMEOUT_MS;
-  const signal = abortContext.deadline(timeoutMs);
-  let response: Awaited<ReturnType<typeof client.messages.create>>;
-  try {
-    response = await client.messages.create(
-      {
-        model: config.conciergeModel,
-        max_tokens: 512,
-        system: `${RATATOSKR_SOUL}
+  const response = await callLLM(
+    {
+      model: primaryModel(),
+      max_tokens: 512,
+      system: `${RATATOSKR_SOUL}
 
 Summarize this task result in 2-3 terse sentences. Lead with what was done, not the process. If there are code changes, mention what files changed and why. Skip file-by-file breakdowns, test counts, and implementation details. No bullet points, no headers, no markdown. Plain text only.`,
-        messages: [{ role: "user", content: body }],
-      },
-      { signal }
-    );
-  } catch (err) {
-    throw abortContext.normalize(
-      err,
-      signal,
-      "Anthropic summarization request",
-      timeoutMs
-    );
-  }
+      messages: [{ role: "user", content: body }],
+    },
+    {
+      abortContext,
+      primaryTimeoutMs: primaryTimeoutMs(deps, ANTHROPIC_REQUEST_TIMEOUT_MS),
+      fallbackTimeoutMs: deps.llmFallbackTimeoutMs,
+    }
+  );
 
-  const text = response.content[0].type === "text" ? response.content[0].text : "";
+  const text = response.content[0]?.type === "text" ? response.content[0].text : "";
   return text.trim() || body;
 }
