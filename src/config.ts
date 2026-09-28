@@ -53,6 +53,10 @@ export const config = {
   llmFallbackApiKey: process.env.LLM_FALLBACK_API_KEY || "",
   llmFallbackModel: process.env.LLM_FALLBACK_MODEL || "",
   llmPrimaryTimeoutMs: positiveIntEnv(process.env.LLM_PRIMARY_TIMEOUT_MS, 20000),
+  llmPrimaryTimeoutMsExplicit:
+    process.env.LLM_PRIMARY_TIMEOUT_MS !== undefined &&
+    process.env.LLM_PRIMARY_TIMEOUT_MS !== "" &&
+    !isInvalidPositiveInt(process.env.LLM_PRIMARY_TIMEOUT_MS),
   llmFallbackTimeoutMs: positiveIntEnv(
     process.env.LLM_FALLBACK_TIMEOUT_MS,
     60000
@@ -165,9 +169,41 @@ export function isLocalHost(urlStr: string): boolean {
   return false; // a public hostname/IP
 }
 
-// Mirrors LOOPBACK_HOSTS in auth.ts — kept local so config validation has no
-// dependency on the auth layer. Wildcard binds expose every interface.
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
+function normalizedHostname(hostname: string): string {
+  return hostname.replace(/^\[|\]$/g, "").toLowerCase();
+}
+
+function ipv4Parts(hostname: string): number[] | null {
+  const parts = hostname.split(".");
+  if (parts.length !== 4 || parts.some((part) => !/^\d+$/.test(part))) {
+    return null;
+  }
+  const numbers = parts.map(Number);
+  return numbers.every((part) => part >= 0 && part <= 255) ? numbers : null;
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = normalizedHostname(hostname);
+  if (normalized === "localhost" || normalized === "::1") return true;
+  return ipv4Parts(normalized)?.[0] === 127;
+}
+
+function isProtectedHttpHostname(hostname: string): boolean {
+  const normalized = normalizedHostname(hostname);
+  if (isLoopbackHostname(normalized)) return true;
+  const parts = ipv4Parts(normalized);
+  if (!parts) return false;
+  const [a, b] = parts;
+  return (
+    a === 10 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 100 && b >= 64 && b <= 127)
+  );
+}
+
+// Kept local so config validation has no dependency on the auth layer.
+// Wildcard binds expose every interface.
 const WILDCARD_HOSTS = new Set(["0.0.0.0", "::"]);
 
 export function validateConfig(): void {
@@ -228,7 +264,7 @@ export function validateConfig(): void {
   // Remote-send posture (see docs/remote-send.md). Non-fatal — the bot must keep
   // serving Telegram even when /api/send is fail-closed, and a misconfig here
   // should be loud at boot rather than surface only as a runtime 401.
-  if (!LOOPBACK_HOSTS.has(config.host)) {
+  if (!isLoopbackHostname(config.host)) {
     if (!config.sendApiKey) {
       console.warn(
         `⚠️  HOST=${config.host} is non-loopback but RATATOSKR_SEND_API_KEY is unset — ` +
@@ -324,6 +360,14 @@ function validateLlmUrl(value: string, label: string): void {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     console.error(`${label} must use http or https`);
     process.exit(1);
+    return;
+  }
+  if (parsed.protocol === "http:" && !isProtectedHttpHostname(parsed.hostname)) {
+    console.error(
+      `${label} must use HTTPS for public endpoints; plain HTTP is allowed only ` +
+        `for loopback, RFC1918 private, or Tailscale addresses`
+    );
+    process.exit(1);
   }
 }
 
@@ -332,7 +376,13 @@ function validateLlmCredentials(
   apiKey: string,
   label: string
 ): void {
-  if (url && !isLocalHost(url) && !apiKey) {
+  let loopback = false;
+  try {
+    loopback = isLoopbackHostname(new URL(url).hostname);
+  } catch {
+    // URL syntax is validated separately; fail closed if this helper is called alone.
+  }
+  if (url && !loopback && !apiKey) {
     console.error(`${label} is required for a non-loopback LLM endpoint`);
     process.exit(1);
   }

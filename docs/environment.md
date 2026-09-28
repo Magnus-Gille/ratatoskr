@@ -13,13 +13,13 @@ and the M5 fallback rules stay inline in `AGENTS.md`.
 | `ANTHROPIC_API_KEY` | — | API key for the default Anthropic concierge provider (required when selected) |
 | `CONCIERGE_MODEL` | `claude-haiku-4-5-20251001` | Model for intent triage |
 | `LLM_PROVIDER` | `anthropic` | Concierge provider: `anthropic` or `openai-compatible` |
-| `LLM_BASE_URL` | — | Base URL for the OpenAI-compatible concierge endpoint; required with `LLM_PROVIDER=openai-compatible` |
-| `LLM_API_KEY` | — | Optional for loopback OpenAI-compatible endpoints; required for non-loopback endpoints |
+| `LLM_BASE_URL` | — | Base URL for the OpenAI-compatible concierge endpoint; required with `LLM_PROVIDER=openai-compatible`. HTTPS is required except for loopback, RFC1918 private, or Tailscale addresses. |
+| `LLM_API_KEY` | — | Optional only for loopback OpenAI-compatible endpoints; required for every other endpoint, including private-network and Tailscale addresses |
 | `LLM_MODEL` | — | Model for the OpenAI-compatible provider; required when that provider is selected |
-| `LLM_FALLBACK_BASE_URL` | — | Optional OpenAI-compatible endpoint used after a primary network error, non-2xx response, or timeout |
-| `LLM_FALLBACK_API_KEY` | — | Optional fallback endpoint key; required when the fallback endpoint is non-loopback |
+| `LLM_FALLBACK_BASE_URL` | — | Optional OpenAI-compatible endpoint used after a primary network error, non-2xx response, or timeout. HTTPS is required except for loopback, RFC1918 private, or Tailscale addresses. |
+| `LLM_FALLBACK_API_KEY` | — | Optional only for a loopback fallback endpoint; required for every other fallback endpoint |
 | `LLM_FALLBACK_MODEL` | primary model | Optional fallback model override |
-| `LLM_PRIMARY_TIMEOUT_MS` | `20000` | Primary interactive LLM request timeout |
+| `LLM_PRIMARY_TIMEOUT_MS` | `20000` | Primary interactive LLM request timeout for OpenAI-compatible mode; Anthropic retains its historical `60000` ms default when this variable is unset |
 | `LLM_FALLBACK_TIMEOUT_MS` | `60000` | Fallback LLM request timeout |
 | `MUNIN_URL` | `<MUNIN_BASE_URL>` | Munin HTTP endpoint |
 | `MUNIN_API_KEY` | — | Bearer token for Munin (required) |

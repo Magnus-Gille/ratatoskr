@@ -15,6 +15,15 @@ vi.mock("../src/config.js", () => ({
   config: {
     anthropicApiKey: "test-key",
     conciergeModel: "claude-haiku-4-5-20251001",
+    llmProvider: "anthropic",
+    llmBaseUrl: "",
+    llmApiKey: "",
+    llmModel: "",
+    llmFallbackBaseUrl: "",
+    llmFallbackApiKey: "",
+    llmFallbackModel: "",
+    llmPrimaryTimeoutMs: 20000,
+    llmFallbackTimeoutMs: 60000,
     triageUrl: "http://100.100.100.100:8080/delegate",
     triageModel: "qwen3-30b-instruct",
     triageApiKey: "test-m5-key",
@@ -24,6 +33,7 @@ vi.mock("../src/config.js", () => ({
 }));
 
 import { triage } from "../src/concierge.js";
+import { config } from "../src/config.js";
 
 /** A well-formed gateway DelegationOutcome for a successful local triage. */
 function gatewaySuccess(decision: unknown) {
@@ -63,16 +73,49 @@ function anthropicAnswers(reply: string) {
   });
 }
 
+function openAiAnswers(reply: string) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      choices: [
+        {
+          message: {
+            role: "assistant",
+            content: JSON.stringify({ action: "answer", reply }),
+          },
+          finish_reason: "stop",
+        },
+      ],
+      usage: { prompt_tokens: 300, completion_tokens: 30 },
+    }),
+  };
+}
+
 describe("triage via the M5 gateway (issue #31)", () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     mockCreate.mockReset();
+    config.llmProvider = "anthropic";
+    config.llmBaseUrl = "";
+    config.llmApiKey = "";
+    config.llmModel = "";
+    config.llmFallbackBaseUrl = "";
+    config.llmFallbackApiKey = "";
+    config.llmFallbackModel = "";
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
   });
 
   afterEach(() => {
     warnSpy.mockRestore();
+    config.llmProvider = "anthropic";
+    config.llmBaseUrl = "";
+    config.llmApiKey = "";
+    config.llmModel = "";
+    config.llmFallbackBaseUrl = "";
+    config.llmFallbackApiKey = "";
+    config.llmFallbackModel = "";
   });
 
   it("POSTs a /delegate request with taskType=triage, pinned model, verifier, and auth", async () => {
@@ -214,6 +257,32 @@ describe("triage via the M5 gateway (issue #31)", () => {
     // Fallback must be VISIBLE (issue #31 acceptance): a log line, not silence.
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("falling back")
+    );
+  });
+
+  it("logs the configured OpenAI-compatible destination when M5 falls back", async () => {
+    config.llmProvider = "openai-compatible";
+    config.llmBaseUrl = "http://llm.test/v1";
+    config.llmApiKey = "test-openai-key";
+    config.llmModel = "openai-triage";
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        json: async () => ({}),
+      })
+      .mockResolvedValueOnce(openAiAnswers("OpenAI fallback served")) as unknown as typeof fetch;
+
+    const result = await triage("hi", [], "No context", null, undefined, {
+      fetchImpl,
+    });
+
+    expect(result.action).toBe("answer");
+    expect(result.meta.backend).toBe("openai-compatible");
+    expect(result.meta.fallback).toBe(true);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("http://llm.test/v1")
     );
   });
 

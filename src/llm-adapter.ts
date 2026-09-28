@@ -189,8 +189,45 @@ function translateOpenAIMessage(message: LLMMessage): Record<string, unknown>[] 
       block !== null &&
       (block as { type?: unknown }).type === "tool_result"
   );
+  const imageBlocks = message.content.filter(
+    (block): block is {
+      type: "image";
+      source: { type: "base64"; media_type: string; data: string };
+    } => {
+      if (typeof block !== "object" || block === null) return false;
+      const source = (block as { source?: unknown }).source;
+      return (
+        (block as { type?: unknown }).type === "image" &&
+        typeof source === "object" &&
+        source !== null &&
+        (source as { type?: unknown }).type === "base64" &&
+        typeof (source as { media_type?: unknown }).media_type === "string" &&
+        typeof (source as { data?: unknown }).data === "string"
+      );
+    }
+  );
+  const textDocumentBlocks = message.content.filter(
+    (block): block is {
+      type: "document";
+      source: { type: "text"; data: string };
+    } => {
+      if (typeof block !== "object" || block === null) return false;
+      const source = (block as { source?: unknown }).source;
+      return (
+        (block as { type?: unknown }).type === "document" &&
+        typeof source === "object" &&
+        source !== null &&
+        (source as { type?: unknown }).type === "text" &&
+        typeof (source as { data?: unknown }).data === "string"
+      );
+    }
+  );
   const knownCount =
-    textBlocks.length + toolUseBlocks.length + toolResultBlocks.length;
+    textBlocks.length +
+    toolUseBlocks.length +
+    toolResultBlocks.length +
+    imageBlocks.length +
+    textDocumentBlocks.length;
   if (knownCount !== message.content.length) {
     throw new LLMConfigurationError(
       "Unsupported non-text LLM content for openai-compatible provider"
@@ -198,7 +235,12 @@ function translateOpenAIMessage(message: LLMMessage): Record<string, unknown>[] 
   }
 
   if (toolResultBlocks.length > 0) {
-    if (message.role !== "user" || toolUseBlocks.length > 0) {
+    if (
+      message.role !== "user" ||
+      toolUseBlocks.length > 0 ||
+      imageBlocks.length > 0 ||
+      textDocumentBlocks.length > 0
+    ) {
       throw new LLMConfigurationError("Invalid LLM tool result message");
     }
     return toolResultBlocks.map((block) => ({
@@ -209,7 +251,11 @@ function translateOpenAIMessage(message: LLMMessage): Record<string, unknown>[] 
   }
 
   if (toolUseBlocks.length > 0) {
-    if (message.role !== "assistant") {
+    if (
+      message.role !== "assistant" ||
+      imageBlocks.length > 0 ||
+      textDocumentBlocks.length > 0
+    ) {
       throw new LLMConfigurationError("LLM tool use blocks must be assistant content");
     }
     return [
@@ -224,6 +270,45 @@ function translateOpenAIMessage(message: LLMMessage): Record<string, unknown>[] 
             arguments: JSON.stringify(block.input) ?? "{}",
           },
         })),
+      },
+    ];
+  }
+
+  if (imageBlocks.length > 0 || textDocumentBlocks.length > 0) {
+    return [
+      {
+        role: message.role,
+        content: message.content.map((block) => {
+          if (
+            typeof block === "object" &&
+            block !== null &&
+            (block as { type?: unknown }).type === "text"
+          ) {
+            return {
+              type: "text",
+              text: (block as { text: string }).text,
+            };
+          }
+          if (
+            typeof block === "object" &&
+            block !== null &&
+            (block as { type?: unknown }).type === "image"
+          ) {
+            const image = block as (typeof imageBlocks)[number];
+            return {
+              type: "image_url",
+              image_url: {
+                url:
+                  "data:" +
+                  image.source.media_type +
+                  ";base64," +
+                  image.source.data,
+              },
+            };
+          }
+          const document = block as (typeof textDocumentBlocks)[number];
+          return { type: "text", text: document.source.data };
+        }),
       },
     ];
   }
@@ -384,7 +469,20 @@ async function callOpenAICompatible(
   let responseBody: unknown;
   try {
     responseBody = await response.json();
-  } catch {
+  } catch (err) {
+    if (
+      signal.aborted ||
+      (err instanceof Error &&
+        (err.name === "AbortError" || err.name === "TimeoutError"))
+    ) {
+      throw normalizeTransportError(
+        err,
+        signal,
+        options.abortContext,
+        "LLM response body",
+        endpoint.timeoutMs
+      );
+    }
     throw new LLMConfigurationError("LLM response was not valid JSON");
   }
   return parseOpenAIResponse(responseBody);

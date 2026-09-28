@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock the Anthropic SDK before importing concierge
 const mockCreate = vi.fn();
@@ -13,6 +13,16 @@ vi.mock("../src/config.js", () => ({
   config: {
     anthropicApiKey: "test-key",
     conciergeModel: "claude-haiku-4-5-20251001",
+    llmProvider: "anthropic",
+    llmBaseUrl: "",
+    llmApiKey: "",
+    llmModel: "",
+    llmFallbackBaseUrl: "",
+    llmFallbackApiKey: "",
+    llmFallbackModel: "",
+    llmPrimaryTimeoutMs: 20000,
+    llmPrimaryTimeoutMsExplicit: false,
+    llmFallbackTimeoutMs: 60000,
     allowedRepos: ["heimdall", "ratatoskr", "myapp"],
   },
 }));
@@ -20,11 +30,14 @@ vi.mock("../src/config.js", () => ({
 import {
   triage,
   gatherContext,
+  summarizeResult,
   MAX_CONCIERGE_REPLY_CHARS,
   MAX_TASK_TITLE_CHARS,
+  ANTHROPIC_REQUEST_TIMEOUT_MS,
 } from "../src/concierge.js";
 import { AbortContext } from "../src/abort-context.js";
 import type { MuninClient } from "../src/munin-client.js";
+import { config } from "../src/config.js";
 
 function mockMunin(): MuninClient {
   return {
@@ -36,9 +49,55 @@ function mockMunin(): MuninClient {
   } as unknown as MuninClient;
 }
 
+function openAiResponse(decision: unknown) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      choices: [
+        {
+          message: { role: "assistant", content: JSON.stringify(decision) },
+          finish_reason: "stop",
+        },
+      ],
+      usage: { prompt_tokens: 12, completion_tokens: 8 },
+    }),
+  };
+}
+
+class RecordingAbortContext extends AbortContext {
+  readonly deadlines: number[] = [];
+
+  override deadline(timeoutMs: number): AbortSignal {
+    this.deadlines.push(timeoutMs);
+    return new AbortController().signal;
+  }
+}
+
 describe("concierge", () => {
   beforeEach(() => {
     mockCreate.mockReset();
+    config.conciergeModel = "claude-haiku-4-5-20251001";
+    config.llmProvider = "anthropic";
+    config.llmBaseUrl = "";
+    config.llmPrimaryTimeoutMs = 20000;
+    config.llmPrimaryTimeoutMsExplicit = false;
+    config.llmApiKey = "";
+    config.llmModel = "";
+    config.llmFallbackBaseUrl = "";
+    config.llmFallbackApiKey = "";
+    config.llmFallbackModel = "";
+  });
+
+  afterEach(() => {
+    config.conciergeModel = "claude-haiku-4-5-20251001";
+    config.llmProvider = "anthropic";
+    config.llmBaseUrl = "";
+    config.llmApiKey = "";
+    config.llmModel = "";
+    config.llmFallbackBaseUrl = "";
+    config.llmFallbackApiKey = "";
+    config.llmFallbackModel = "";
   });
 
   describe("triage", () => {
@@ -268,6 +327,36 @@ describe("concierge", () => {
       expect(textBlock.text).toBe("What's in this image?");
     });
 
+    it("maps image attachments for an OpenAI-compatible triage request", async () => {
+      config.llmProvider = "openai-compatible";
+      config.llmBaseUrl = "http://llm.test/v1";
+      config.llmApiKey = "test-openai-key";
+      config.llmModel = "vision-model";
+      const fetchImpl = vi.fn().mockResolvedValue(
+        openAiResponse({ action: "answer", reply: "I see a dashboard." })
+      );
+
+      const result = await triage(
+        "what is this?",
+        [],
+        "No context",
+        null,
+        [{ base64: "abc123base64data", mediaType: "image/jpeg" }],
+        { fetchImpl }
+      );
+
+      expect(result.action).toBe("answer");
+      const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(String(init.body));
+      expect(body.messages[1].content).toEqual([
+        {
+          type: "image_url",
+          image_url: { url: "data:image/jpeg;base64,abc123base64data" },
+        },
+        { type: "text", text: "what is this?" },
+      ]);
+    });
+
     it("sends PDF and text documents as Anthropic document blocks", async () => {
       mockCreate.mockResolvedValue({
         content: [
@@ -311,6 +400,84 @@ describe("concierge", () => {
       expect(content.at(-1).text).toContain("Summarize this document");
     });
 
+    it("passes plain-text documents as text to an OpenAI-compatible provider", async () => {
+      config.llmProvider = "openai-compatible";
+      config.llmBaseUrl = "http://llm.test/v1";
+      config.llmModel = "text-model";
+      const fetchImpl = vi.fn().mockResolvedValue(
+        openAiResponse({ action: "answer", reply: "Document summarized." })
+      );
+
+      const result = await triage(
+        "summarize this",
+        [],
+        "No context",
+        null,
+        undefined,
+        { fetchImpl },
+        [{ kind: "text", text: "plain contents", title: "notes.txt" }]
+      );
+
+      expect(result.action).toBe("answer");
+      const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(String(init.body));
+      expect(body.messages[1].content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "text",
+            text: expect.stringContaining("plain contents"),
+          }),
+        ])
+      );
+      expect(body.messages[1].content).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ type: "document" })])
+      );
+    });
+
+    it("returns a user-facing error for PDF attachments with an OpenAI-compatible provider", async () => {
+      config.llmProvider = "openai-compatible";
+      config.llmBaseUrl = "http://llm.test/v1";
+      const fetchImpl = vi.fn();
+
+      const result = await triage(
+        "summarize this",
+        [],
+        "No context",
+        null,
+        undefined,
+        { fetchImpl },
+        [{ kind: "pdf", base64: "pdfdata", title: "report.pdf" }]
+      );
+      expect(result.action).toBe("answer");
+      if (result.action === "answer") {
+        expect(result.reply).toMatch(/PDF.*not supported.*OpenAI-compatible/i);
+      }
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
+    it("turns an unsupported PDF fallback into a user-facing error", async () => {
+      config.llmProvider = "anthropic";
+      config.llmFallbackBaseUrl = "http://llm.test/v1";
+      mockCreate.mockRejectedValue(new Error("Anthropic unavailable"));
+      const fetchImpl = vi.fn();
+
+      const result = await triage(
+        "summarize this",
+        [],
+        "No context",
+        null,
+        undefined,
+        { fetchImpl },
+        [{ kind: "pdf", base64: "pdfdata", title: "report.pdf" }]
+      );
+
+      expect(result.action).toBe("answer");
+      if (result.action === "answer") {
+        expect(result.reply).toMatch(/PDF.*not supported.*OpenAI-compatible/i);
+      }
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
     it("should send plain string message when no images provided", async () => {
       mockCreate.mockResolvedValue({
         content: [
@@ -347,6 +514,69 @@ describe("concierge", () => {
       expect(result.meta.outputTokens).toBe(45);
       expect(result.meta.latencyMs).toBeGreaterThanOrEqual(0);
       expect(Number.isFinite(result.meta.latencyMs)).toBe(true);
+    });
+
+    it("keeps CONCIERGE_MODEL and Anthropic's historical default timeout", async () => {
+      config.llmProvider = "anthropic";
+      config.conciergeModel = "configured-concierge-model";
+      config.llmModel = "generic-llm-model";
+      const abortContext = new RecordingAbortContext();
+      mockCreate.mockResolvedValue({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ action: "answer", reply: "Hello!" }),
+          },
+        ],
+      });
+
+      await triage("hi", [], "No context", null, undefined, { abortContext });
+
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ model: "configured-concierge-model" }),
+        expect.anything()
+      );
+      expect(abortContext.deadlines).toEqual([ANTHROPIC_REQUEST_TIMEOUT_MS]);
+    });
+
+    it("honors an explicitly configured LLM_PRIMARY_TIMEOUT_MS for Anthropic", async () => {
+      config.llmProvider = "anthropic";
+      config.llmPrimaryTimeoutMs = 1234;
+      config.llmPrimaryTimeoutMsExplicit = true;
+      const abortContext = new RecordingAbortContext();
+      mockCreate.mockResolvedValue({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ action: "answer", reply: "Hello!" }),
+          },
+        ],
+      });
+
+      await triage("hi", [], "No context", null, undefined, { abortContext });
+
+      expect(abortContext.deadlines).toEqual([1234]);
+    });
+
+    it("uses CONCIERGE_MODEL and the primary timeout for Anthropic summaries", async () => {
+      config.llmProvider = "anthropic";
+      config.conciergeModel = "summary-model";
+      config.llmModel = "generic-llm-model";
+      config.llmPrimaryTimeoutMs = 2345;
+      config.llmPrimaryTimeoutMsExplicit = true;
+      const abortContext = new RecordingAbortContext();
+      mockCreate.mockResolvedValue({
+        content: [{ type: "text", text: "Short summary." }],
+      });
+
+      const result = await summarizeResult("long result", { abortContext });
+
+      expect(result).toBe("Short summary.");
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ model: "summary-model" }),
+        expect.anything()
+      );
+      expect(abortContext.deadlines).toEqual([2345]);
     });
 
     it("should default token counts to 0 when the API response has no usage field", async () => {

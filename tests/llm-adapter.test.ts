@@ -1,5 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+const { mockAnthropicCreate } = vi.hoisted(() => ({
+  mockAnthropicCreate: vi.fn(),
+}));
+
+vi.mock("@anthropic-ai/sdk", () => ({
+  default: vi.fn().mockImplementation(() => ({
+    messages: { create: mockAnthropicCreate },
+  })),
+}));
+
 vi.mock("../src/config.js", () => ({
   config: {
     llmProvider: "openai-compatible",
@@ -17,6 +27,7 @@ vi.mock("../src/config.js", () => ({
   isLocalHost: (url: string) => url.includes("localhost"),
 }));
 
+import { config } from "../src/config.js";
 import { callLLM } from "../src/llm-adapter.js";
 
 const request = {
@@ -38,12 +49,14 @@ describe("OpenAI-compatible LLM adapter", () => {
 
   beforeEach(() => {
     fetchMock = vi.fn();
+    config.llmProvider = "openai-compatible";
+    mockAnthropicCreate.mockReset();
     vi.stubGlobal("fetch", fetchMock);
   });
 
   afterEach(() => {
+    config.llmProvider = "openai-compatible";
     vi.unstubAllGlobals();
-    vi.restoreAllMocks();
   });
 
   it("translates a plain text request and response", async () => {
@@ -81,6 +94,133 @@ describe("OpenAI-compatible LLM adapter", () => {
       stop_reason: "end_turn",
       usage: { input_tokens: 7, output_tokens: 3 },
     });
+  });
+
+  it("calls Anthropic and normalizes its response through the adapter", async () => {
+    config.llmProvider = "anthropic";
+    mockAnthropicCreate.mockResolvedValue({
+      content: [{ type: "text", text: "anthropic reply" }],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 11, output_tokens: 4 },
+    });
+    const result = await callLLM(request);
+
+    expect(mockAnthropicCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "requested-model",
+        messages: request.messages,
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      content: [{ type: "text", text: "anthropic reply" }],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 11, output_tokens: 4 },
+    });
+  });
+
+  it("maps attachments when an Anthropic outage falls back to OpenAI-compatible", async () => {
+    config.llmProvider = "anthropic";
+    mockAnthropicCreate.mockRejectedValue(new Error("Anthropic unavailable"));
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        choices: [
+          {
+            message: { role: "assistant", content: "fallback vision result" },
+            finish_reason: "stop",
+          },
+        ],
+      })
+    );
+
+    const result = await callLLM({
+      ...request,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: "image/png",
+                data: "image-data",
+              },
+            },
+            {
+              type: "document",
+              source: {
+                type: "text",
+                media_type: "text/plain",
+                data: "document text",
+              },
+            },
+            { type: "text", text: "describe these" },
+          ],
+        },
+      ],
+    });
+
+    expect(result.content).toEqual([
+      { type: "text", text: "fallback vision result" },
+    ]);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).messages[1].content).toEqual([
+      {
+        type: "image_url",
+        image_url: { url: "data:image/png;base64,image-data" },
+      },
+      { type: "text", text: "document text" },
+      { type: "text", text: "describe these" },
+    ]);
+  });
+
+  it("preserves Anthropic text blocks across an OpenAI-compatible round trip", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: [
+                { type: "text", text: "hello" },
+                { type: "text", text: " back" },
+              ],
+            },
+            finish_reason: "stop",
+          },
+        ],
+      })
+    );
+
+    const result = await callLLM({
+      ...request,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "hello" },
+            { type: "text", text: " there" },
+          ],
+        },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "earlier" },
+            { type: "text", text: " answer" },
+          ],
+        },
+      ],
+    });
+
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
+    expect(body.messages).toEqual([
+      { role: "system", content: "Be concise." },
+      { role: "user", content: "hello there" },
+      { role: "assistant", content: "earlier answer" },
+    ]);
+    expect(result.content).toEqual([{ type: "text", text: "hello back" }]);
   });
 
   it("supports a complete tool-call and tool-result round trip", async () => {
@@ -303,6 +443,50 @@ describe("OpenAI-compatible LLM adapter", () => {
 
     expect(result.content).toEqual([{ type: "text", text: "network fallback" }]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("normalizes a response-body AbortError and falls back", async () => {
+    const abortError = new Error("response body was aborted");
+    abortError.name = "AbortError";
+    const abortedResponse = {
+      ok: true,
+      json: vi.fn().mockRejectedValue(abortError),
+    } as unknown as Response;
+
+    fetchMock
+      .mockResolvedValueOnce(abortedResponse)
+      .mockResolvedValueOnce(
+        jsonResponse({
+          choices: [
+            {
+              message: { role: "assistant", content: "body fallback" },
+              finish_reason: "stop",
+            },
+          ],
+        })
+      );
+
+    const result = await callLLM(request);
+
+    expect(result.content).toEqual([{ type: "text", text: "body fallback" }]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not fall back after a real response JSON parse failure", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: vi.fn().mockRejectedValue(new SyntaxError("invalid JSON")),
+    } as unknown as Response);
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        choices: [
+          { message: { role: "assistant", content: "should not serve" } },
+        ],
+      })
+    );
+
+    await expect(callLLM(request)).rejects.toThrow("not valid JSON");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("falls back after a primary timeout", async () => {
