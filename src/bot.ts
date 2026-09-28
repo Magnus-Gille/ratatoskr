@@ -37,6 +37,7 @@ export function buildTriageLogEntry(
       model: meta.model,
       backend: meta.backend,
       fallback: meta.fallback,
+      providerFallback: meta.providerFallback ?? false,
       attempts: meta.attempts,
       latencyMs: meta.latencyMs,
       inputTokens: meta.inputTokens,
@@ -48,6 +49,7 @@ export function buildTriageLogEntry(
       `action:${action}`,
       `backend:${meta.backend}`,
       ...(meta.fallback ? ["fallback:m5"] : []),
+      ...(meta.providerFallback ? ["fallback:llm"] : []),
       `instance:${config.instanceId}`,
     ],
   };

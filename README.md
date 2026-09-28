@@ -13,9 +13,9 @@ alerts, reminders, and task results back to chat.
 ## What it does
 
 - **Concierge triage** — incoming messages are classified by a small model
-  (Claude Haiku by default, optionally a local M5 gateway model) and either answered
-  directly, turned into Hugin tasks, or politely declined. Per-chat rate limits bound
-  API spend.
+  (Claude Haiku by default, optionally an OpenAI-compatible endpoint or local M5
+  gateway model) and either answered directly, turned into Hugin tasks, or politely
+  declined. Per-chat rate limits bound API spend.
 - **Reminders** — `POST /api/reminders` with idempotent scheduling and delivery
   receipts (`docs/reminders.md`).
 - **Authenticated remote send** — trusted tailnet hosts can fire Telegram pings
@@ -41,12 +41,18 @@ alerts, reminders, and task results back to chat.
 ## Running it
 
 ```bash
-cp .env.example .env   # fill in TELEGRAM_BOT_TOKEN, allowlist, keys
+# Copy .env.example into an untracked local configuration source and fill in
+# TELEGRAM_BOT_TOKEN, the allowlist, and the required keys.
 npm ci
 npm test
 npm run build
 node dist/index.js
 ```
+
+The default concierge provider is Anthropic. To use an OpenAI-compatible endpoint,
+set `LLM_PROVIDER=openai-compatible`, `LLM_BASE_URL`, and `LLM_MODEL`; see
+`docs/environment.md` for fallback and timeout settings. Use placeholders for
+endpoint URLs and credentials in shared configuration examples.
 
 Production runs as a systemd service on a Raspberry Pi — see `ratatoskr.service`
 and `scripts/deploy-pi.sh`. Component inventory (hosts, ports, units) lives in the

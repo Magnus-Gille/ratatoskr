@@ -10,14 +10,14 @@ Part of the Grimnir system: **Munin** (memory), **Hugin** (task dispatcher), **R
 
 - **Runtime:** Node.js 20+, TypeScript (strict mode)
 - **Framework:** Express (health endpoint only) + grammy (Telegram bot)
-- **AI:** @anthropic-ai/sdk (Haiku for intent triage via concierge layer)
-- **Deployment:** systemd on Pi 1 (huginmunin), port 3034
+- **AI:** provider-neutral LLM adapter (Anthropic by default)
+- **Deployment:** systemd on a private deployment host, port 3034
 - **Telegram mode:** Long-polling (no webhook, no inbound HTTP)
 
 ### How it works
 
 1. Telegram message arrives from allowlisted user
-2. Concierge layer calls Claude Haiku with message + Munin context
+2. Concierge layer calls the configured LLM with message + Munin context
 3. Haiku decides: ready (submit task), clarify (ask user), or answer (reply directly)
 4. If ready: task-writer formats Hugin task and writes to Munin
 5. Result-poller monitors task completion and replies on Telegram
@@ -30,8 +30,9 @@ Reference material lives under `docs/`; start with `docs/index.md`.
   handlers, concierge triage, Munin/Hugin task flow, reminders, alerts,
   transcription, document storage, recovery, and health/Heimdall surfaces.
 - `docs/environment.md` — the full runtime configuration table for
-  `TELEGRAM_*`, `MUNIN_*`, `CONCIERGE_MODEL`, `RATATOSKR_*`, and
-  `HEIMDALL_*`.
+  `TELEGRAM_*`, `MUNIN_*`, `CONCIERGE_MODEL`, `LLM_*`, `RATATOSKR_*`, and
+  `HEIMDALL_*`. Public examples must use placeholder endpoints and credential
+  values only.
 - `docs/remote-send.md` — authenticated remote `/api/send` over Tailscale and
   the `scripts/ratatoskr send` operational path.
 - `docs/reminders.md` — reminder API plus persistence, delivery, and crash
@@ -61,10 +62,10 @@ TELEGRAM_BOT_TOKEN=<token> TELEGRAM_ALLOWED_USERS=<user_id> MUNIN_API_KEY=<key> 
 ## Deployment
 
 ```bash
-./scripts/deploy-pi.sh [hostname]
+./scripts/deploy-pi.sh [<DEPLOY_HOST>]
 ```
 
-Default host: `huginmunin.local`.
+Default host: `<DEPLOY_HOST>`.
 
 The deploy script records the exact source SHA in `.deployed-commit` only after
 the restart/status check passes, so Heimdall/Grimnir can prove which revision is
@@ -77,17 +78,24 @@ than falsely claiming either revision.
 
 ### Operational notifications
 
-On the Pi, `./scripts/ratatoskr send <text>` reads the deployed `.env` and calls
+On the deployment host, `./scripts/ratatoskr send <text>` reads the deployed
+configuration and calls
 Telegram directly, so it works even when `ratatoskr.service` is stopped. For the
-authenticated HTTP path, use `http://${HOST:-127.0.0.1}:${PORT:-3034}/api/send`;
+authenticated HTTP path, use the configured `HOST` and `PORT` for `/api/send`;
 production is bound to the Tailscale address, not loopback. See
 `docs/remote-send.md` for the exact recipe and the Himalaya email fallback.
 
-The Pi needs a `.env` file at `/home/magnus/repos/ratatoskr/.env`:
+The deployment needs an untracked local configuration file based on `.env.example`:
 ```
 TELEGRAM_BOT_TOKEN=<from BotFather>
 TELEGRAM_ALLOWED_USERS=<magnus telegram user id>
-ANTHROPIC_API_KEY=<for concierge Haiku calls>
+ANTHROPIC_API_KEY=<for concierge Haiku calls when LLM_PROVIDER=anthropic>
+LLM_PROVIDER=anthropic
+# For an OpenAI-compatible provider, use placeholders for these values:
+# LLM_PROVIDER=openai-compatible
+# LLM_BASE_URL=<LLM_BASE_URL>
+# LLM_API_KEY=<LLM_API_KEY>
+# LLM_MODEL=<LLM_MODEL>
 MUNIN_API_KEY=<same key Munin/Hugin use>
 ```
 
@@ -98,7 +106,7 @@ see **`docs/remote-send.md`** (bind `HOST` to the Tailscale IP + set
 
 ## Concierge design
 
-The concierge is a lightweight Claude Haiku call (~2000 tokens, ~$0.001/call) that triages incoming Telegram messages before submitting Hugin tasks. It receives:
+The concierge is a lightweight configured LLM call that triages incoming Telegram messages before submitting Hugin tasks. It receives:
 - The user's message
 - Recent Munin context (last 5 log entries from active projects, current task queue)
 - Conversation history (if in a clarification loop)

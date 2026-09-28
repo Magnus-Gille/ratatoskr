@@ -7,17 +7,26 @@ and the M5 fallback rules stay inline in `AGENTS.md`.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3034` | Health endpoint port |
-| `HOST` | `127.0.0.1` | Bind address. Set to the Pi's Tailscale IP to enable authenticated remote send (requires `RATATOSKR_SEND_API_KEY`). See `docs/remote-send.md`. |
+| `HOST` | `<BIND_HOST>` | Bind address. Set to the deployment host's private overlay address to enable authenticated remote send (requires `RATATOSKR_SEND_API_KEY`). See `docs/remote-send.md`. |
 | `TELEGRAM_BOT_TOKEN` | — | Bot token from @BotFather (required) |
 | `TELEGRAM_ALLOWED_USERS` | — | Comma-separated Telegram user IDs (required) |
-| `ANTHROPIC_API_KEY` | — | API key for concierge Haiku calls (required) |
+| `ANTHROPIC_API_KEY` | — | API key for the default Anthropic concierge provider (required when selected) |
 | `CONCIERGE_MODEL` | `claude-haiku-4-5-20251001` | Model for intent triage |
-| `MUNIN_URL` | `http://localhost:3030` | Munin HTTP endpoint |
+| `LLM_PROVIDER` | `anthropic` | Concierge provider: `anthropic` or `openai-compatible` |
+| `LLM_BASE_URL` | — | Base URL for the OpenAI-compatible concierge endpoint; required with `LLM_PROVIDER=openai-compatible` |
+| `LLM_API_KEY` | — | Optional for loopback OpenAI-compatible endpoints; required for non-loopback endpoints |
+| `LLM_MODEL` | — | Model for the OpenAI-compatible provider; required when that provider is selected |
+| `LLM_FALLBACK_BASE_URL` | — | Optional OpenAI-compatible endpoint used after a primary network error, non-2xx response, or timeout |
+| `LLM_FALLBACK_API_KEY` | — | Optional fallback endpoint key; required when the fallback endpoint is non-loopback |
+| `LLM_FALLBACK_MODEL` | primary model | Optional fallback model override |
+| `LLM_PRIMARY_TIMEOUT_MS` | `20000` | Primary interactive LLM request timeout |
+| `LLM_FALLBACK_TIMEOUT_MS` | `60000` | Fallback LLM request timeout |
+| `MUNIN_URL` | `<MUNIN_BASE_URL>` | Munin HTTP endpoint |
 | `MUNIN_API_KEY` | — | Bearer token for Munin (required) |
 | `POLL_INTERVAL_MS` | `30000` | How often to check task results |
 | `MAX_POLL_DURATION_MS` | `7200000` | Stop polling after this (2x default task timeout) |
 | `RATATOSKR_INSTANCE_ID` | `default` | Instance identifier for multi-instance isolation |
-| `REPOS_BASE_PATH` | `/home/magnus/repos` | Base path for resolving `repo:<name>` context to filesystem paths |
+| `REPOS_BASE_PATH` | `<REPOS_BASE_PATH>` | Base path for resolving `repo:<name>` context to filesystem paths |
 | `RATATOSKR_ALLOWED_REPOS` | Grimnir component repos | Comma-separated allowlist for `repo:<name>` task contexts. Invalid, unknown, path-like, or newline-containing repo contexts are rejected in `task-writer` before a Hugin task is written. |
 | `RATATOSKR_SEND_API_KEY` | — | Bearer token for `POST /api/send`. Mandatory when `HOST` is non-loopback (the endpoint is disabled otherwise); when set, enforced on **all** binds incl. loopback. See `docs/remote-send.md`. |
 | `RATATOSKR_CHAT_ID` | first `TELEGRAM_ALLOWED_USERS` entry | Optional default destination for `./scripts/ratatoskr send`; supports private and negative group/channel IDs. |

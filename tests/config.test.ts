@@ -36,6 +36,42 @@ describe("config validation", () => {
     );
   });
 
+  it("loads the OpenAI-compatible provider settings", async () => {
+    process.env.TELEGRAM_BOT_TOKEN = "test-token";
+    process.env.TELEGRAM_ALLOWED_USERS = "123";
+    process.env.MUNIN_API_KEY = "test-key";
+    process.env.LLM_PROVIDER = "openai-compatible";
+    process.env.LLM_BASE_URL = "http://localhost:1234/v1";
+    process.env.LLM_MODEL = "local-model";
+    delete process.env.ANTHROPIC_API_KEY;
+
+    const { config: loadedConfig, validateConfig } = await import("../src/config.js");
+    validateConfig();
+
+    expect(loadedConfig.llmProvider).toBe("openai-compatible");
+    expect(loadedConfig.llmBaseUrl).toBe("http://localhost:1234/v1");
+    expect(loadedConfig.llmModel).toBe("local-model");
+    expect(loadedConfig.llmPrimaryTimeoutMs).toBe(20000);
+    expect(loadedConfig.llmFallbackTimeoutMs).toBe(60000);
+  });
+
+  it("requires a base URL and model for the OpenAI-compatible provider", async () => {
+    process.env.TELEGRAM_BOT_TOKEN = "test-token";
+    process.env.TELEGRAM_ALLOWED_USERS = "123";
+    process.env.MUNIN_API_KEY = "test-key";
+    process.env.LLM_PROVIDER = "openai-compatible";
+    delete process.env.LLM_BASE_URL;
+    delete process.env.LLM_MODEL;
+    delete process.env.ANTHROPIC_API_KEY;
+
+    const { validateConfig } = await import("../src/config.js");
+
+    expect(() => validateConfig()).toThrow("process.exit called");
+    expect(mockError).toHaveBeenCalledWith(
+      expect.stringContaining("LLM_BASE_URL")
+    );
+  });
+
   it("should exit if TELEGRAM_ALLOWED_USERS is empty", async () => {
     process.env.TELEGRAM_BOT_TOKEN = "test-token";
     process.env.ANTHROPIC_API_KEY = "test-key";
