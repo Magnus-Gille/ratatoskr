@@ -395,9 +395,9 @@ function primaryTimeoutMs(
 
 function configuredLlmDestination(): string {
   if (config.llmProvider === "openai-compatible") {
-    const endpoint = config.llmBaseUrl || "configured endpoint";
+    // Never log the endpoint URL: it may carry userinfo or query credentials.
     const model = config.llmModel || "configured model";
-    return "OpenAI-compatible " + endpoint + " (" + model + ")";
+    return "OpenAI-compatible provider (" + model + ")";
   }
   return "Anthropic (" + config.conciergeModel + ")";
 }

@@ -282,8 +282,9 @@ describe("triage via the M5 gateway (issue #31)", () => {
     expect(result.meta.backend).toBe("openai-compatible");
     expect(result.meta.fallback).toBe(true);
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("http://llm.test/v1")
+      expect.stringContaining("OpenAI-compatible provider")
     );
+    expect(warnSpy.mock.calls.flat().join(" ")).not.toContain("llm.test");
   });
 
   it("falls back on a gateway timeout (errorClass=timeout)", async () => {
