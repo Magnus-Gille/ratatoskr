@@ -20,14 +20,20 @@ export class ServiceShutdownError extends Error {
   }
 }
 
+const deadlineSources = new WeakMap<AbortSignal, AbortSignal>();
+
 export class AbortContext {
   private readonly controller = new AbortController();
 
   deadline(timeoutMs: number): AbortSignal {
-    return AbortSignal.any([
-      this.controller.signal,
-      AbortSignal.timeout(timeoutMs),
-    ]);
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const combined = AbortSignal.any([this.controller.signal, timeout]);
+    // On Node 20, AbortSignal.any() does not keep its source signals alive, so
+    // the AbortSignal.timeout() source can be garbage-collected before it
+    // fires and the deadline never aborts. Tie the timeout's lifetime to the
+    // combined signal the caller holds.
+    deadlineSources.set(combined, timeout);
+    return combined;
   }
 
   abort(): void {
