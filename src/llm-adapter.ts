@@ -86,8 +86,16 @@ type ProviderEndpoint = {
   baseUrl?: string;
   apiKey?: string;
   model?: string;
+  extraBody?: Record<string, unknown>;
   timeoutMs: number;
 };
+
+const CANONICAL_OPENAI_BODY_KEYS = new Set([
+  "model",
+  "messages",
+  "tools",
+  "max_tokens",
+]);
 
 function providerFromConfig(): LLMProvider {
   return config.llmProvider === "openai-compatible"
@@ -429,7 +437,13 @@ async function callOpenAICompatible(
     throw new LLMConfigurationError("LLM_BASE_URL is required for openai-compatible provider");
   }
   const messages = params.messages.flatMap(translateOpenAIMessage);
+  const extraBody = Object.fromEntries(
+    Object.entries(endpoint.extraBody ?? {}).filter(
+      ([key]) => !CANONICAL_OPENAI_BODY_KEYS.has(key)
+    )
+  );
   const body: Record<string, unknown> = {
+    ...extraBody,
     model: endpoint.model || params.model,
     messages: [
       ...(params.system !== undefined
@@ -571,6 +585,7 @@ export async function callLLM(
     baseUrl: config.llmBaseUrl,
     apiKey: provider === "anthropic" ? config.anthropicApiKey : config.llmApiKey,
     model: params.model,
+    extraBody: provider === "openai-compatible" ? config.llmPrimaryExtraBody : undefined,
     timeoutMs: primaryTimeoutMs,
   };
 
@@ -597,6 +612,7 @@ export async function callLLM(
       baseUrl: config.llmFallbackBaseUrl,
       apiKey: config.llmFallbackApiKey,
       model: config.llmFallbackModel || params.model,
+      extraBody: config.llmFallbackExtraBody,
       timeoutMs: fallbackTimeoutMs,
     };
     try {

@@ -35,6 +35,37 @@ function repoListEnv(raw: string | undefined): string[] {
     .filter(Boolean);
 }
 
+type JsonObject = Record<string, unknown>;
+
+/** Parse an optional endpoint-body override without throwing during module load. */
+function parseJsonObjectEnv(raw: string | undefined): JsonObject {
+  if (raw === undefined || raw.trim() === "") return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? parsed as JsonObject
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function validateJsonObjectEnv(raw: string | undefined, label: string): JsonObject {
+  if (raw === undefined || raw.trim() === "") return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as JsonObject;
+    }
+  } catch {
+    // Report the same actionable configuration error for malformed JSON and a
+    // valid JSON value that is not an object.
+  }
+  console.error(`${label} must be valid JSON for an object`);
+  process.exit(1);
+  return {};
+}
+
 export const config = {
   port: parseInt(process.env.PORT || "3034"),
   host: process.env.HOST || "127.0.0.1",
@@ -52,6 +83,8 @@ export const config = {
   llmFallbackBaseUrl: process.env.LLM_FALLBACK_BASE_URL || "",
   llmFallbackApiKey: process.env.LLM_FALLBACK_API_KEY || "",
   llmFallbackModel: process.env.LLM_FALLBACK_MODEL || "",
+  llmPrimaryExtraBody: parseJsonObjectEnv(process.env.LLM_PRIMARY_EXTRA_BODY),
+  llmFallbackExtraBody: parseJsonObjectEnv(process.env.LLM_FALLBACK_EXTRA_BODY),
   llmPrimaryTimeoutMs: positiveIntEnv(process.env.LLM_PRIMARY_TIMEOUT_MS, 20000),
   llmPrimaryTimeoutMsExplicit:
     process.env.LLM_PRIMARY_TIMEOUT_MS !== undefined &&
@@ -207,6 +240,15 @@ function isProtectedHttpHostname(hostname: string): boolean {
 const WILDCARD_HOSTS = new Set(["0.0.0.0", "::"]);
 
 export function validateConfig(): void {
+  config.llmPrimaryExtraBody = validateJsonObjectEnv(
+    process.env.LLM_PRIMARY_EXTRA_BODY,
+    "LLM_PRIMARY_EXTRA_BODY"
+  );
+  config.llmFallbackExtraBody = validateJsonObjectEnv(
+    process.env.LLM_FALLBACK_EXTRA_BODY,
+    "LLM_FALLBACK_EXTRA_BODY"
+  );
+
   const required: { key: keyof typeof config; label: string }[] = [
     { key: "telegramBotToken", label: "TELEGRAM_BOT_TOKEN" },
     { key: "muninApiKey", label: "MUNIN_API_KEY" },

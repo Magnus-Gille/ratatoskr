@@ -55,6 +55,38 @@ describe("config validation", () => {
     expect(loadedConfig.llmFallbackTimeoutMs).toBe(60000);
   });
 
+  it("parses optional endpoint extra bodies as JSON objects", async () => {
+    setRequired();
+    process.env.LLM_PROVIDER = "openai-compatible";
+    process.env.LLM_BASE_URL = "http://localhost:1234/v1";
+    process.env.LLM_MODEL = "local-model";
+    process.env.LLM_PRIMARY_EXTRA_BODY = '{"reasoning_effort":"high"}';
+    process.env.LLM_FALLBACK_EXTRA_BODY = '{"temperature":0.2}';
+
+    const { config: loadedConfig, validateConfig } = await import("../src/config.js");
+    validateConfig();
+
+    expect(loadedConfig.llmPrimaryExtraBody).toEqual({ reasoning_effort: "high" });
+    expect(loadedConfig.llmFallbackExtraBody).toEqual({ temperature: 0.2 });
+  });
+
+  it.each([
+    ["LLM_PRIMARY_EXTRA_BODY", "{not-json"],
+    ["LLM_FALLBACK_EXTRA_BODY", "{not-json"],
+    ["LLM_PRIMARY_EXTRA_BODY", "[]"],
+    ["LLM_FALLBACK_EXTRA_BODY", "null"],
+  ])("rejects %s when it is not valid JSON object text", async (variable, value) => {
+    setRequired();
+    process.env.LLM_PROVIDER = "openai-compatible";
+    process.env.LLM_BASE_URL = "http://localhost:1234/v1";
+    process.env.LLM_MODEL = "local-model";
+    process.env[variable] = value;
+
+    const { validateConfig } = await import("../src/config.js");
+    expect(() => validateConfig()).toThrow("process.exit called");
+    expect(mockError).toHaveBeenCalledWith(expect.stringContaining(variable));
+  });
+
   it("requires a base URL and model for the OpenAI-compatible provider", async () => {
     process.env.TELEGRAM_BOT_TOKEN = "test-token";
     process.env.TELEGRAM_ALLOWED_USERS = "123";

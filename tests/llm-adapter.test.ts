@@ -19,6 +19,8 @@ vi.mock("../src/config.js", () => ({
     llmFallbackBaseUrl: "http://localhost:2345/v1",
     llmFallbackApiKey: "fallback-key",
     llmFallbackModel: "fallback-model",
+    llmPrimaryExtraBody: {},
+    llmFallbackExtraBody: {},
     llmPrimaryTimeoutMs: 20,
     llmFallbackTimeoutMs: 50,
     anthropicApiKey: "anthropic-key",
@@ -50,6 +52,8 @@ describe("OpenAI-compatible LLM adapter", () => {
   beforeEach(() => {
     fetchMock = vi.fn();
     config.llmProvider = "openai-compatible";
+    config.llmPrimaryExtraBody = {};
+    config.llmFallbackExtraBody = {};
     mockAnthropicCreate.mockReset();
     vi.stubGlobal("fetch", fetchMock);
   });
@@ -94,6 +98,76 @@ describe("OpenAI-compatible LLM adapter", () => {
       stop_reason: "end_turn",
       usage: { input_tokens: 7, output_tokens: 3 },
     });
+  });
+
+  it("merges primary extra body fields while keeping canonical request fields authoritative", async () => {
+    config.llmPrimaryExtraBody = {
+      reasoning_effort: "high",
+      model: "wrong-model",
+      messages: [{ role: "user", content: "wrong" }],
+      tools: [{ type: "function", function: { name: "wrong" } }],
+      max_tokens: 999,
+    };
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+      })
+    );
+
+    await callLLM({
+      ...request,
+      tools: [{ name: "lookup", input_schema: { type: "object" } }],
+    });
+
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
+    expect(body).toEqual({
+      reasoning_effort: "high",
+      model: "requested-model",
+      messages: [
+        { role: "system", content: "Be concise." },
+        { role: "user", content: "hello" },
+      ],
+      tools: [{ type: "function", function: { name: "lookup", parameters: { type: "object" } } }],
+      max_tokens: 32,
+    });
+  });
+
+  it("isolates primary and fallback extra bodies", async () => {
+    config.llmPrimaryExtraBody = { primary_option: true };
+    config.llmFallbackExtraBody = { fallback_option: true };
+    fetchMock
+      .mockResolvedValueOnce(new Response("unavailable", { status: 503 }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          choices: [{ message: { role: "assistant", content: "fallback" }, finish_reason: "stop" }],
+        })
+      );
+
+    await callLLM(request);
+
+    const primaryBody = JSON.parse(String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body));
+    const fallbackBody = JSON.parse(String((fetchMock.mock.calls[1] as [string, RequestInit])[1].body));
+    expect(primaryBody.primary_option).toBe(true);
+    expect(primaryBody.fallback_option).toBeUndefined();
+    expect(fallbackBody.fallback_option).toBe(true);
+    expect(fallbackBody.primary_option).toBeUndefined();
+  });
+
+  it("does not send primary extras to Anthropic", async () => {
+    config.llmProvider = "anthropic";
+    config.llmPrimaryExtraBody = { provider_option: true };
+    mockAnthropicCreate.mockResolvedValue({
+      content: [{ type: "text", text: "anthropic reply" }],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+
+    await callLLM(request);
+
+    expect(mockAnthropicCreate).toHaveBeenCalledWith(
+      expect.not.objectContaining({ provider_option: true }),
+      expect.anything()
+    );
   });
 
   it("calls Anthropic and normalizes its response through the adapter", async () => {

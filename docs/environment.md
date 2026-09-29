@@ -19,6 +19,8 @@ and the M5 fallback rules stay inline in `AGENTS.md`.
 | `LLM_FALLBACK_BASE_URL` | — | Optional OpenAI-compatible endpoint used after a primary network error, non-2xx response, or timeout. HTTPS is required except for loopback, RFC1918 private, or Tailscale addresses. |
 | `LLM_FALLBACK_API_KEY` | — | Optional only for a loopback fallback endpoint; required for every other fallback endpoint |
 | `LLM_FALLBACK_MODEL` | primary model | Optional fallback model override |
+| `LLM_PRIMARY_EXTRA_BODY` | — | Optional JSON object merged into the primary OpenAI-compatible chat-completions request. The canonical `model`, `messages`, `tools`, and `max_tokens` fields always win; invalid JSON or a non-object fails configuration validation. |
+| `LLM_FALLBACK_EXTRA_BODY` | — | Optional JSON object merged into the fallback OpenAI-compatible chat-completions request. It is isolated from the primary body and is not sent to Anthropic; invalid JSON or a non-object fails configuration validation. |
 | `LLM_PRIMARY_TIMEOUT_MS` | `20000` | Primary interactive LLM request timeout for OpenAI-compatible mode; Anthropic retains its historical `60000` ms default when this variable is unset |
 | `LLM_FALLBACK_TIMEOUT_MS` | `60000` | Fallback LLM request timeout |
 | `MUNIN_URL` | `<MUNIN_BASE_URL>` | Munin HTTP endpoint |
