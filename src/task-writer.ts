@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
 import { MuninClient } from "./munin-client.js";
-import { signTask } from "./task-signing.js";
+import { setTaskSignature, signTask } from "./task-signing.js";
 
 export interface TaskSubmission {
   title: string;
@@ -76,28 +76,28 @@ function formatTaskMarkdown(taskId: string, submission: TaskSubmission, submitte
 **Submitted at:** ${submittedAt}
 **Reply-to:** telegram:${submission.chatId}`;
 
-  const signature = config.signingSecret
-    ? signTask(
-        {
-          taskId,
-          submitter,
-          submittedAt,
-          runtime,
-          prompt,
-        },
-        config.signingKeyId,
-        config.signingSecret,
-      )
-    : null;
-
-  const signatureLine = signature ? `\n**Signature:** ${signature}` : "";
-
-  const content = `${header}${signatureLine}
+  const unsignedContent = `${header}
 
 ### Prompt
 
 ${prompt}
 `;
+
+  const content = config.signingSecret
+    ? setTaskSignature(
+        unsignedContent,
+        signTask(
+          {
+            taskId,
+            submitter,
+            submittedAt,
+            taskBody: unsignedContent,
+          },
+          config.signingKeyId,
+          config.signingSecret,
+        ),
+      )
+    : unsignedContent;
 
   return { content, taskId };
 }
