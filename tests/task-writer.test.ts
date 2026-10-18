@@ -116,7 +116,7 @@ describe("task-writer", () => {
         munin,
       );
       const content = munin.write.mock.calls[0][2] as string;
-      expect(content).toMatch(/\*\*Signature:\*\* v1:ratatoskr:[0-9a-f]{64}/);
+      expect(content).toMatch(/- \*\*Signature:\*\* v2:ratatoskr:[0-9a-f]{64}/);
     } finally {
       config.signingSecret = prev.secret;
       config.signingKeyId = prev.keyId;

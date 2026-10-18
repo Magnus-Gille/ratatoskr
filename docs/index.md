@@ -25,3 +25,6 @@ these docs for lookup material.
 
 - `alert-consumer-evidence-2026-07-26.md` — bounded production receipt/readback
   evidence for Ratatoskr's Heimdall firing/resolution lifecycle.
+- `task-signing-v2-rollout.md` — v2 complete-document signing contract,
+  coordinated exact-revision rollout and rollback, and the pinned compatibility
+  fixture provenance.
