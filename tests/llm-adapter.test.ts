@@ -5,9 +5,11 @@ const { mockAnthropicCreate } = vi.hoisted(() => ({
 }));
 
 vi.mock("@anthropic-ai/sdk", () => ({
-  default: vi.fn().mockImplementation(() => ({
-    messages: { create: mockAnthropicCreate },
-  })),
+  default: vi.fn().mockImplementation(function () {
+    return {
+      messages: { create: mockAnthropicCreate },
+    };
+  }),
 }));
 
 vi.mock("../src/config.js", () => ({
