@@ -1,4 +1,5 @@
 import path from "node:path";
+import { isLoopbackBindHost } from "./loopback.js";
 
 /** Parse an env var as a positive integer, falling back to `fallback` if it is
  *  missing, non-numeric, or ≤ 0. Keeps the runtime safe from a mistyped value. */
@@ -306,7 +307,7 @@ export function validateConfig(): void {
   // Remote-send posture (see docs/remote-send.md). Non-fatal — the bot must keep
   // serving Telegram even when /api/send is fail-closed, and a misconfig here
   // should be loud at boot rather than surface only as a runtime 401.
-  if (!isLoopbackHostname(config.host)) {
+  if (!isLoopbackBindHost(config.host)) {
     if (!config.sendApiKey) {
       console.warn(
         `⚠️  HOST=${config.host} is non-loopback but RATATOSKR_SEND_API_KEY is unset — ` +
