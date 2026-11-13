@@ -1,13 +1,12 @@
 import { timingSafeEqual } from "node:crypto";
 import type { Request, Response, NextFunction } from "express";
-
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
+import { isLoopbackBindHost } from "./loopback.js";
 
 export function requireSendApiKey(
   sendApiKey: string,
   host: string
 ): (req: Request, res: Response, next: NextFunction) => void {
-  const isLoopback = LOOPBACK_HOSTS.has(host);
+  const isLoopback = isLoopbackBindHost(host);
 
   return (req: Request, res: Response, next: NextFunction): void => {
     if (!sendApiKey) {
